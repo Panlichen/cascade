@@ -803,13 +803,14 @@ std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK
     uint32_t shard_num = subgroup_handle.get_shard_num();
 
     std::vector<std::vector<node_id_t>> subgroup_members = group->template get_subgroup_members<WANPersistentCascadeStore>(subgroup_index);
-    std::cout << subgroup_members << std::endl;
+      // std::cout << subgroup_members << std::endl;
 
     // std::size_t number_of_shards = group->template get_number_of_shards<WANPersistentCascadeStore>(subgroup_index);
 
     node_id_t my_id = getConfUInt32(CONF_DERECHO_LOCAL_ID);
     dbg_default_info("My id is {}", my_id);
 
+    // "node_with_lowest_rank" may not be the real "node_with_lowest_rank", but it does not matter.
     node_id_t node_with_lowest_rank = subgroup_members.at(shard_num).at(0);
 
     if(node_with_lowest_rank == my_id) {

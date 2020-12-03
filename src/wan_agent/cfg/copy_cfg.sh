@@ -1,0 +1,1 @@
+cp -r ~/lcpan/cascade/src/wan_agent/cfg ~/lcpan/cascade/build/src/wan_agent/
