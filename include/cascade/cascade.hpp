@@ -461,7 +461,8 @@ public:
                            ordered_get_size,
                            submit_predicate,
                            change_predicate,
-                           do_wan_agent_send);
+                           do_wan_agent_send,
+                           set_sender_info);
     virtual std::tuple<persistent::version_t, uint64_t> put(
             const VT& value) override;
     virtual std::tuple<persistent::version_t, uint64_t> remove(
@@ -500,9 +501,11 @@ public:
     void change_predicate(const std::string& key);
 
     void do_wan_agent_send(const VT& value);
+    void set_sender_info(const node_id_t sender_id);
 
     std::unique_ptr<wan_agent::WanAgentSender> wan_agent_sender;
     nlohmann::json wan_conf_json;
+    node_id_t sender_in_my_shard;
 
 public:
     void init_wan_config();
