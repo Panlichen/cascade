@@ -82,13 +82,6 @@ target_include_directories(cascade_wan_client PRIVATE
 # cascade has linked lib wan_agent already, so maybe we do not link again here.
 target_link_libraries(cascade_wan_client cascade readline predicate_generator)
 
-add_library(cascade_wan_ondata_example SHARED cascade_wan_ondata_library_example.cpp)
-target_include_directories(cascade_wan_ondata_example PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-)
-
 add_executable(perf_with_wan perf_with_wan.cpp)
 target_include_directories(perf_with_wan PRIVATE
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>

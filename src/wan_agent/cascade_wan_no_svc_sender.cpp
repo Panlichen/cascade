@@ -64,11 +64,12 @@ int main(int argc, char** argv) {
                                 mm_iter++;
                             }
 
-                            // TODO: use the node with lowest shard_rank or sender_rank to call Replicated<T>.ordered_send to avoid redundant broadcast.
+                            /* use the node with lowest shard_rank or sender_rank to call Replicated<T>.ordered_send to avoid redundant broadcast. */
                             dbg_default_info("I am in subgroup({}), shard({}), subgroup_settings says my shard_num is {}, shard_rank is {}, sender_rank is {}", my_subgroup_id, shard_num, subgroup_settings.shard_num, subgroup_settings.shard_rank, subgroup_settings.sender_rank);
 
                             /* NOTE: parameter for get_subgroup is "The index of the subgroup within the set of subgroups that replicate the same type of object", not the global subgroup_id */
                             /* CANNOT use auto, must point out SubgroupType */
+                            /* TODO: type determination is kind of stupid */
                             if(my_type_id == 0) {
                                 Replicated<WPCSU>& subgroup_handle = group.get_subgroup<WPCSU>(my_subgroup_index);
                                 dbg_default_info("my_type_id is {}, my_subgroup_index is {}, subgroup_handle says subgroup_id is {}, shard_num is {}", my_type_id, my_subgroup_index, subgroup_handle.get_subgroup_id(), subgroup_handle.get_shard_num());
