@@ -799,29 +799,16 @@ std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK
             "in reply, version=0x{:x},timestamp={}; in value variable, version=0x{:x}",
             std::get<0>(ret), std::get<1>(ret), value.get_version());
 
-    // TODO: determine to call do_wan_agent_send itself or invoke p2p_call
-
-    // fail to set sender_id during initialization or view change
-    if(sender_in_my_shard == static_cast<node_id_t>(-1)) {
-        uint32_t shard_num = subgroup_handle.get_shard_num();
-
-        std::vector<std::vector<node_id_t>> subgroup_members = group->template get_subgroup_members<WANPersistentCascadeStore>(subgroup_index);
-
-        sender_in_my_shard = subgroup_members.at(shard_num).at(0);
-
-        // broadcast to other nodes in shard
-        subgroup_handle.template ordered_send<RPC_NAME(set_sender_info)>(sender_in_my_shard);
-    }
-
+    /* determine whehter or not to invoke do_wan_agent_send itself */
     node_id_t my_id = getConfUInt32(CONF_DERECHO_LOCAL_ID);
     dbg_default_info("My id is {}", my_id);
 
-    if(sender_in_my_shard == my_id) {
-        dbg_default_info("I am the node with lowest rank in my shard, I'll send to WanAgentServers");
+    if(wan_sender_in_my_shard == my_id) {
+        dbg_default_info("I am the node with lowest shard_rank in my shard, I'll send to WanAgentServers");
         do_wan_agent_send(value);
     } else {
-        dbg_default_info("I'll tell the node with lowest rank in my shard to send to WanAgentServers");
-        subgroup_handle.template p2p_send<RPC_NAME(do_wan_agent_send)>(sender_in_my_shard, value);
+        dbg_default_info("I'll tell the node with lowest shard_rank in my shard to send to WanAgentServers");
+        subgroup_handle.template p2p_send<RPC_NAME(do_wan_agent_send)>(wan_sender_in_my_shard, value);
     }
 
     return ret;
@@ -1097,8 +1084,10 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::init_wan_config() {
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
-void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::set_sender_info(const node_id_t sender_id) {
-    sender_in_my_shard = sender_id;
+void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::set_wan_sender_info(const node_id_t sender_id) {
+    
+    dbg_default_info("Informed that the wan_sender is {}", sender_id);
+    wan_sender_in_my_shard = sender_id;
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
@@ -1111,7 +1100,7 @@ WANPersistentCascadeStore<KT, VT, IK, IV, ST>::WANPersistentCascadeStore(
                           nullptr, pr),
           cascade_watcher_ptr(cw),
           wan_conf_json(nlohmann::json::parse(derecho::getConfString(CONF_WAN_SENDER_CFG))) {
-    sender_in_my_shard = static_cast<node_id_t>(-1);
+    wan_sender_in_my_shard = static_cast<node_id_t>(-1);
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
@@ -1122,7 +1111,7 @@ WANPersistentCascadeStore<KT, VT, IK, IV, ST>::WANPersistentCascadeStore(
         : persistent_core(std::move(_persistent_core)),
           cascade_watcher_ptr(cw),
           wan_conf_json(nlohmann::json::parse(derecho::getConfString(CONF_WAN_SENDER_CFG))) {
-    sender_in_my_shard = static_cast<node_id_t>(-1);
+    wan_sender_in_my_shard = static_cast<node_id_t>(-1);
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
@@ -1131,7 +1120,7 @@ WANPersistentCascadeStore<KT, VT, IK, IV, ST>::WANPersistentCascadeStore(
         : persistent_core(std::move(_wan_persistent_cascade_store.persistent_core)),
           cascade_watcher_ptr(std::move(_wan_persistent_cascade_store.cascade_watcher_ptr.get())),
           wan_agent_sender(std::move(_wan_persistent_cascade_store.wan_agent_sender.get())) {
-    sender_in_my_shard = static_cast<node_id_t>(-1);
+    wan_sender_in_my_shard = static_cast<node_id_t>(-1);
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
