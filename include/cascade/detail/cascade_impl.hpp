@@ -841,6 +841,10 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::do_wan_agent_send(const VT& 
             buffer += wan_max_payload_size;
             actual_size -= wan_max_payload_size;
         }
+        // if there is still some remain message
+        if(actual_size > 0) {
+            wan_agent_sender->send(buffer, actual_size);
+        }
     }
 
     debug_leave_func_with_value("Send to WanAgent server {} bytes.", actual_size);
@@ -1085,8 +1089,7 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::init_wan_config() {
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
 void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::set_wan_sender_info(const node_id_t sender_id) {
-    
-    dbg_default_info("Informed that the wan_sender is {}", sender_id);
+        dbg_default_info("Informed that the wan_sender is {}", sender_id);
     wan_sender_in_my_shard = sender_id;
 }
 
