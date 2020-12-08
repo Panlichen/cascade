@@ -176,7 +176,7 @@ struct client_states {
     std::thread poll_thread;
     std::thread wait_stability_frontier_thread;
     // 8. future for stability frontier
-    derecho::rpc::QueryResults<int> sf_future;
+    // derecho::rpc::QueryResults<int> sf_future;
     // constructor:
     client_states(uint64_t _max_pending_ops, uint64_t _num_messages, uint64_t _message_size) : max_pending_ops(_max_pending_ops),
                                                                                                num_messages(_num_messages),
@@ -203,14 +203,14 @@ struct client_states {
     // waiting stability frontier
     void waiting_stability_forntier() {
         pthread_setname_np(pthread_self(), "waiting_stability_forntier");
-        dbg_default_trace("waiting stability forntier thread started.");
-        derecho::rpc::QueryResults<int>::ReplyMap& replies = sf_future.get();
-        for(auto& reply_pair : replies) {
-            auto r = reply_pair.second.get();
-        }
-        dbg_default_trace("stability arrived");
-        uint64_t sf_arrive_time = get_time_us();
-        cout 
+        // dbg_default_trace("waiting stability forntier thread started.");
+        // derecho::rpc::QueryResults<int>::ReplyMap& replies = sf_future.get();
+        // for(auto& reply_pair : replies) {
+        //     auto r = reply_pair.second.get();
+        // }
+        // dbg_default_trace("stability arrived");
+        // uint64_t sf_arrive_time = get_time_us();
+        // cout << "";
     }
     // thread
     // polling thread
