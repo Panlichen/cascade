@@ -462,7 +462,8 @@ public:
                            submit_predicate,
                            change_predicate,
                            do_wan_agent_send,
-                           wait_for_stability_frontier);
+                           wait_for_stability_frontier,
+                           set_wan_sender_info);
     virtual std::tuple<persistent::version_t, uint64_t> put(
             const VT& value) override;
     virtual std::tuple<persistent::version_t, uint64_t> remove(
@@ -501,11 +502,13 @@ public:
     void change_predicate(const std::string& key);
 
     void do_wan_agent_send(const VT& value);
+    void set_wan_sender_info(const node_id_t sender_id);
 
     int wait_for_stability_frontier(int sf);
 
     std::unique_ptr<wan_agent::WanAgentSender> wan_agent_sender;
     nlohmann::json wan_conf_json;
+    node_id_t wan_sender_in_my_shard;
 
 public:
     void init_wan_config();

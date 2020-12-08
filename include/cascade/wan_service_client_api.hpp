@@ -5,8 +5,8 @@
 namespace derecho {
 namespace cascade {
 /**
-         * The client API
-         */
+ * The client API
+ */
 using ServiceClientAPI = ServiceClient<WPCSU, WPCSS>;
 
 }  // namespace cascade
