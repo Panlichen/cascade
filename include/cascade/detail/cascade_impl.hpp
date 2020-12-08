@@ -800,6 +800,22 @@ std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK
             std::get<0>(ret), std::get<1>(ret), value.get_version());
 
     /* determine whehter or not to invoke do_wan_agent_send itself */
+
+    /* TODO: for now, if we use Cascade Service, we cannot determine 
+     * wan_sender_in_my_shard in view_upcall, so temporally set it here.
+     * For every shard, only set once. So if view changes, it may be wrong. Yet OK for now. */
+    if(wan_sender_in_my_shard == static_cast<node_id_t>(-1)) {
+        uint32_t shard_num = subgroup_handle.template get_shard_num();
+
+        std::vector<std::vector<node_id_t>> subgroup_members = group->template get_subgroup_members<WANPersistentCascadeStore>(subgroup_index);
+
+        wan_sender_in_my_shard = subgroup_members.at(shard_num).at(0);
+
+        // broadcast to other nodes in shard
+        dbg_default_info("Did not set wan_sender_in_my_shard in view_upcall, broadcast it to be {}", wan_sender_in_my_shard);
+        subgroup_handle.template ordered_send<RPC_NAME(set_wan_sender_info)>(wan_sender_in_my_shard);
+    }
+
     node_id_t my_id = getConfUInt32(CONF_DERECHO_LOCAL_ID);
     dbg_default_info("My id is {}", my_id);
 
@@ -808,6 +824,7 @@ std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK
         do_wan_agent_send(value);
     } else {
         dbg_default_info("I'll tell the node with lowest shard_rank in my shard to send to WanAgentServers");
+        /* TODO: Observed when set_member_selection_policy to be 'LastMember' in client, put may stuck. */
         subgroup_handle.template p2p_send<RPC_NAME(do_wan_agent_send)>(wan_sender_in_my_shard, value);
     }
 
@@ -1089,7 +1106,7 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::init_wan_config() {
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
 void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::set_wan_sender_info(const node_id_t sender_id) {
-        dbg_default_info("Informed that the wan_sender is {}", sender_id);
+    dbg_default_info("Informed that the wan_sender is {}", sender_id);
     wan_sender_in_my_shard = sender_id;
 }
 
