@@ -55,6 +55,7 @@ add_subdirectory(src/utils)
 add_subdirectory(src/service)
 add_subdirectory(src/test)
 add_subdirectory(src/wan_agent)
+add_subdirectory(src/wan_agent_icdcs)
 
 # make libcascade.so
 add_library(cascade SHARED

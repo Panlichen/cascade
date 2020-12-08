@@ -857,6 +857,12 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::do_wan_agent_send(const VT& 
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
+int WANPersistentCascadeStore<KT, VT, IK, IV, ST>::wait_for_stability_frontier(int sf){
+    
+    return 1;
+}
+
+template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
 std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK, IV, ST>::remove(const KT& key) {
     ///////////////////////////////////////////////////////////////////////////////
     // TODO: It makes sense to send the remove command to the WanAgent's server

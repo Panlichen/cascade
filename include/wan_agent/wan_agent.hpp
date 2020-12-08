@@ -292,6 +292,7 @@ private:
     predicate_fn_type predicate;
     std::map<std::string, predicate_fn_type> predicate_map;
 
+
 public:
     WanAgentSender(const nlohmann::json& wan_group_config,
                    const PredicateLambda& pl, std::string log_level = "trace");
