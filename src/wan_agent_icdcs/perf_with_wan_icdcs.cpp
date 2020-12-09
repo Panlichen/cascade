@@ -176,11 +176,16 @@ struct client_states {
     std::thread poll_thread;
     std::thread wait_stability_frontier_thread;
     // 8. future for stability frontier
-    // derecho::rpc::QueryResults<int> sf_future;
+    const uint64_t target_sf;
+    std::condition_variable wait_sf_cv;
+    std::mutex wait_sf_mutex;
+    std::list<derecho::rpc::QueryResults<int>> wait_sf_queue;
+    // derecho::rpc::QueryResults<int> sf_future = NULL;
     // constructor:
-    client_states(uint64_t _max_pending_ops, uint64_t _num_messages, uint64_t _message_size) : max_pending_ops(_max_pending_ops),
+    client_states(uint64_t _max_pending_ops, uint64_t _num_messages, uint64_t _message_size, uint64_t _target_sf) : max_pending_ops(_max_pending_ops),
                                                                                                num_messages(_num_messages),
-                                                                                               message_size(_message_size) {
+                                                                                               message_size(_message_size),
+                                                                                               target_sf(_target_sf) {
         idle_tx_slot_cnt = _max_pending_ops;
         // allocated timestamp space and zero them out
         this->send_tss = new uint64_t[_num_messages];
@@ -203,14 +208,22 @@ struct client_states {
     // waiting stability frontier
     void waiting_stability_forntier() {
         pthread_setname_np(pthread_self(), "waiting_stability_forntier");
-        // dbg_default_trace("waiting stability forntier thread started.");
-        // derecho::rpc::QueryResults<int>::ReplyMap& replies = sf_future.get();
-        // for(auto& reply_pair : replies) {
-        //     auto r = reply_pair.second.get();
-        // }
-        // dbg_default_trace("stability arrived");
-        // uint64_t sf_arrive_time = get_time_us();
-        // cout << "";
+        dbg_default_trace("waiting stability forntier thread started.");
+        std::list<derecho::rpc::QueryResults<int>> my_wait_sf_queue;
+        std::unique_lock<std::mutex> lck(this->wait_sf_mutex);
+        this->wait_sf_cv.wait(lck, [this]() { return !this->wait_sf_queue.empty(); });
+        lck.unlock();
+         // wait for all futures
+            for(auto& f : wait_sf_queue) {
+                derecho::rpc::QueryResults<int>::ReplyMap& replies = f.get();
+                for(auto& reply_pair : replies) {
+                    auto r = reply_pair.second.get();
+                }
+                dbg_default_trace("stability arrived");
+                uint64_t sf_arrive_time = get_time_us();
+                cout << "stability frontier arrived using (us) : " << sf_arrive_time - send_tss[0] << endl;
+            }
+            dbg_default_trace("wait sf thread shutdown.");
     }
     // thread
     // polling thread
@@ -257,7 +270,20 @@ struct client_states {
         if(this->poll_thread.joinable()) {
             this->poll_thread.join();
         }
+        if(this->wait_stability_frontier_thread.joinable()){
+            this->wait_stability_frontier_thread.join();
+        }
     }
+
+    // do_wait_sf
+    void do_wait_sf(const std::function<derecho::rpc::QueryResults<int>()>& func){
+        auto f = func();
+        std::unique_lock<std::mutex> wait_sf_lck(this->wait_sf_mutex);
+        this->wait_sf_queue.emplace_back(std::move(f));
+        wait_sf_lck.unlock();
+        this->wait_sf_cv.notify_all();
+    }
+
 
     // do_send
     void do_send(uint64_t msg_cnt, const std::function<derecho::rpc::QueryResults<std::tuple<persistent::version_t, uint64_t>>()>& func) {
@@ -329,7 +355,9 @@ int do_client(int argc, char** args) {
     const char* test_type = args[0];
     const uint64_t num_messages = std::stoi(args[1]);
     const int is_wpcss = std::stoi(args[2]);
-    const uint64_t max_pending_ops = (argc >= 4) ? std::stoi(args[3]) : 0;
+    const int target_sf = std::stoi(args[3]);
+    const uint64_t max_pending_ops = (argc >= 5) ? std::stoi(args[4]) : 0;
+
 
     if(strcmp(test_type, "put") != 0) {
         std::cout << "TODO:" << test_type << " not supported yet." << std::endl;
@@ -348,18 +376,19 @@ int do_client(int argc, char** args) {
             msg_size = derecho::getConfUInt64("SUBGROUP/WPCSS/max_payload_size") - 128;
         }
         cout << "msg_size: " << msg_size << endl;
-        struct client_states cs(max_pending_ops, num_messages, msg_size);
+        struct client_states cs(max_pending_ops, num_messages, msg_size, target_sf);
         char* bbuf = (char*)malloc(msg_size);
         bzero(bbuf, msg_size);
 
         ExternalClientCaller<WPCSS, std::remove_reference<decltype(group)>::type>& wpcss_ec = group.get_subgroup_caller<WPCSS>();
         auto members = group.template get_shard_members<WPCSS>(0, 0);
         node_id_t server_id = members[my_node_id % members.size()];
-        std::ifstream inFile("/root/lpz/qwe/cascade/trace_0214.csv", std::ios::in);
+        std::ifstream inFile("/root/lpz/icdcs_cascade/cascade/trace_0214.csv", std::ios::in);
         std::string lineStr;
         getline(inFile, lineStr);
         uint64_t message_index = 0;
-        
+        cs.do_wait_sf([&target_sf, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(wait_for_stability_frontier)>(server_id, target_sf)); });
+
         while (getline(inFile, lineStr))
         {
             std::vector<std::string> fields;
@@ -373,10 +402,7 @@ int do_client(int argc, char** args) {
             int file_size = atoi(fields[0].c_str());
             // cout << "time: " << timestamp << endl;
             cout << "file size: " << file_size << endl;
-            // if(file_size == 98118){
-            //     break;
-            // }
-
+            file_size = msg_size;
             if(file_size < msg_size){
                 ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
                 cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
@@ -385,15 +411,6 @@ int do_client(int argc, char** args) {
             }else{
                  while (file_size > msg_size)
                 {
-                    // for (int i = 0; i < 60; i++)
-                    // {
-                    //     ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
-                    //     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
-                    //     // file_size -= msg_size;
-                    //     message_index++;
-                    //     cout << " 2message index: " << message_index << endl;
-                    // }
-                    // break;
                     ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
                     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                     file_size -= msg_size;
@@ -402,8 +419,7 @@ int do_client(int argc, char** args) {
                 }
                 if (file_size > 0)
                 {
-                    // ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
-                    ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+                    ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
                     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                     message_index++;
                     cout << " 3message index: " << message_index << endl;
@@ -421,25 +437,26 @@ int do_client(int argc, char** args) {
         std::cout << "I AM printing" << std::endl;
         cs.print_statistics();
     } else {
-        if(derecho::hasCustomizedConfKey("SUBGROUP/WPCSU/max_payload_size")) {
-            msg_size = derecho::getConfUInt64("SUBGROUP/WPCSU/max_payload_size") - 128;
-        }
-        struct client_states cs(max_pending_ops, num_messages, msg_size);
-        char* bbuf = (char*)malloc(msg_size);
-        bzero(bbuf, msg_size);
+        // if(derecho::hasCustomizedConfKey("SUBGROUP/WPCSU/max_payload_size")) {
+        //     msg_size = derecho::getConfUInt64("SUBGROUP/WPCSU/max_payload_size") - 128;
+        // }
+        // struct client_states cs(max_pending_ops, num_messages, msg_size);
+        // char* bbuf = (char*)malloc(msg_size);
+        // bzero(bbuf, msg_size);
 
-        ExternalClientCaller<WPCSU, std::remove_reference<decltype(group)>::type>& wpcsu_ec = group.get_subgroup_caller<WPCSU>();
-        auto members = group.template get_shard_members<WPCSU>(0, 0);
-        node_id_t server_id = members[my_node_id % members.size()];
+        // ExternalClientCaller<WPCSU, std::remove_reference<decltype(group)>::type>& wpcsu_ec = group.get_subgroup_caller<WPCSU>();
+        // auto members = group.template get_shard_members<WPCSU>(0, 0);
+        // node_id_t server_id = members[my_node_id % members.size()];
 
-        for(uint64_t i = 0; i < num_messages; i++) {
-            ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, msg_size));
-            cs.do_send(i, [&o, &wpcsu_ec, &server_id]() { return std::move(wpcsu_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
-        }
-        free(bbuf);
+        // for(uint64_t i = 0; i < num_messages; i++) {
+        //     ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, msg_size));
+        //     cs.do_send(i, [&o, &wpcsu_ec, &server_id]() { return std::move(wpcsu_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
+        // }
+        // free(bbuf);
 
-        cs.wait_poll_all();
-        cs.print_statistics();
+        // cs.wait_sf_arrive();
+        // cs.wait_poll_all();
+        // cs.print_statistics();
     }
 
     return 0;

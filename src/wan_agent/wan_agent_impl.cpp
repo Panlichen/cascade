@@ -327,9 +327,16 @@ void MessageSender::predicate_calculation() {
     }
     std::cout << std::endl;
     int val = predicate(5, arr);
+    stability_frontier = pair_ve[val - 1].second;
+    stability_frontier_arrive_cv.notify_one();
     log_debug("predicate val is {}", val);
     log_debug("Stability Frontier key is : {}, value is {}", pair_ve[val - 1].first, pair_ve[val - 1].second);
     log_exit_func();
+}
+
+void MessageSender::wait_stability_frontier(int sf) {
+    std::unique_lock<std::mutex> lock(stability_frontier_arrive_mutex);
+    stability_frontier_arrive_cv.wait(lock, [this, sf]() { return stability_frontier >= sf; });
 }
 
 void MessageSender::enqueue(const char* payload, const size_t payload_size) {
@@ -478,6 +485,9 @@ void WanAgentSender::change_predicate(std::string key) {
     }
 
     // test_predicate();
+}
+void WanAgentSender::wait_stability_frontier(int sf) {
+    message_sender->wait_stability_frontier(sf);
 }
 
 void WanAgentSender::test_predicate() {

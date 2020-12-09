@@ -869,7 +869,7 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::do_wan_agent_send(const VT& 
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
 int WANPersistentCascadeStore<KT, VT, IK, IV, ST>::wait_for_stability_frontier(int sf){
-    
+    wan_agent_sender->wait_stability_frontier(sf);
     return 1;
 }
 

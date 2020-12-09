@@ -15,3 +15,10 @@ add_custom_command(TARGET perf_with_wan_icdcs POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/icdcs_cfg
     ${CMAKE_CURRENT_BINARY_DIR}/icdcs_cfg
 )
+add_executable(cascade_wan_sender_icdcs cascade_wan_sender.cpp)
+target_include_directories(cascade_wan_sender PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+)
+target_link_libraries(cascade_wan_sender_icdcs cascade dl predicate_generator)

@@ -229,6 +229,11 @@ private:
     int epoll_fd_send_msg;
     int epoll_fd_recv_ack;
 
+    // wait for certaion stability frontier
+    int stability_frontier = 0;
+    std::mutex stability_frontier_arrive_mutex;
+    std::condition_variable stability_frontier_arrive_cv;
+
     const size_t n_slots;
     // size_t head = 0;
     // size_t tail = 0;
@@ -264,6 +269,7 @@ public:
     void enqueue(const char* payload, const size_t payload_size);
     void send_msg_loop();
     void predicate_calculation();
+    void wait_stability_frontier(int sf);
     void shutdown() {
         thread_shutdown.store(true);
         std::cout << "set thread_shutdown to " << thread_shutdown.load() << " in MessageSender shutdown\n";
@@ -277,7 +283,9 @@ private:
     std::condition_variable new_ack_cv;
     bool has_new_ack;
     // std::thread predicate_thread;
+    /** the conditional variable for stability waiting*/
 
+    
     /**
          * predicted_lambda is called when an acknowledgement is received.
          */
@@ -286,6 +294,7 @@ private:
     std::unique_ptr<MessageSender> message_sender;
     std::thread recv_ack_thread;
     std::thread send_msg_thread;
+
     std::map<site_id_t, std::atomic<uint64_t>> message_counters;
     std::string predicate_experssion;
     Predicate_Generator* predicate_generator;
@@ -325,6 +334,8 @@ public:
     void submit_predicate(std::string key, std::string predicate_str, bool inplace);
 
     void change_predicate(std::string key);
+
+    void wait_stability_frontier(int sf);
 
     void test_predicate();
     /**
