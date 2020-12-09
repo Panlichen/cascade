@@ -1,0 +1,1 @@
+cp -r ~/lcpan/cascade/src/wan_agent_icdcs/icdcs_cfg_local_test ~/lcpan/cascade/build/src/wan_agent_icdcs/

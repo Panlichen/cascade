@@ -197,7 +197,7 @@ struct client_states {
     // polling thread
     void poll_results() {
         pthread_setname_np(pthread_self(), "poll_results");
-        dbg_default_trace("poll results thread started.");
+        dbg_default_info("poll results thread started.");
         size_t future_counter = 0;
         while(future_counter != this->num_messages) {
             std::list<derecho::rpc::QueryResults<std::tuple<persistent::version_t, uint64_t>>> my_future_queue;
@@ -218,19 +218,21 @@ struct client_states {
                 }
                 // log time
                 this->recv_tss[future_counter++] = get_time_us();
+                if(future_counter % 500 == 0 && future_counter > 0) {
+                    dbg_default_info("{} messages get future", future_counter);
+                }
                 // post tx slot semaphore
                 if(this->max_pending_ops > 0) {
                     this->idle_tx_slot_cnt.fetch_add(1);
                     this->idle_tx_slot_cv.notify_all();
                 }
             }
-
             // shutdown polling thread.
             if(future_counter == this->num_messages) {
                 break;
             }
         }
-        dbg_default_trace("poll results thread shutdown.");
+        dbg_default_info("poll results thread shutdown.");
     }
 
     // wait for polling thread
@@ -310,7 +312,9 @@ int do_client(int argc, char** args) {
     const char* test_type = args[0];
     const uint64_t num_messages = std::stoi(args[1]);
     const int is_wpcss = std::stoi(args[2]);
+    // const uint64_t max_pending_ops = (argc >= 4) ? std::stoi(args[3]) : derecho::getConfUInt32(CONF_DERECHO_P2P_WINDOW_SIZE);
     const uint64_t max_pending_ops = (argc >= 4) ? std::stoi(args[3]) : 0;
+    cout << "using max_pending_ops " << max_pending_ops << endl;
 
     if(strcmp(test_type, "put") != 0) {
         std::cout << "TODO:" << test_type << " not supported yet." << std::endl;
@@ -337,8 +341,14 @@ int do_client(int argc, char** args) {
         node_id_t server_id = members[my_node_id % members.size()];
 
         for(uint64_t i = 0; i < num_messages; i++) {
-            ObjectWithStringKey o(std::to_string(randomize_key(i) % max_distinct_objects), Blob(bbuf, msg_size));
+
+            std::string str(rand() % msg_size, 'a');
+
+            ObjectWithStringKey o(std::to_string(randomize_key(i) % max_distinct_objects), Blob(str.c_str(), str.length()));
             cs.do_send(i, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
+            if((i % 500 == 0 && i > 0) || num_messages - 1 == i) {
+                dbg_default_info("{} messages sent", i);
+            }
         }
         free(bbuf);
 

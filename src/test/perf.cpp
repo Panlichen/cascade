@@ -240,6 +240,7 @@ struct client_states
                 }
                 // log time
                 this->recv_tss[future_counter++] = get_time_us();
+                dbg_default_info("{} messages get future", future_counter);
                 // post tx slot semaphore
                 if (this->max_pending_ops > 0)
                 {
@@ -375,7 +376,16 @@ int do_client(int argc, char **args)
 
         for (uint64_t i = 0; i < num_messages; i++)
         {
-            ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, msg_size));
+            // ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, msg_size));
+            
+            size_t curr_size = rand() % msg_size;
+            std::string str(curr_size, 'a');
+            dbg_default_info("{} messages sent with size {}", i, curr_size);
+            // std::string str(msg_size, 'a');
+            // dbg_default_info("{} messages sent with size {}", i, msg_size);
+
+            ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(str.c_str(), str.length()));
+
             cs.do_send(i, [&o, &pcs_ec, &server_id]() { return std::move(pcs_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
         }
         free(bbuf);
@@ -399,7 +409,15 @@ int do_client(int argc, char **args)
 
         for (uint64_t i = 0; i < num_messages; i++)
         {
-            ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, msg_size));
+            // ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, msg_size));
+            
+            // size_t curr_size = rand() % msg_size;
+            // std::string str(curr_size, 'a');
+            // dbg_default_info("{} messages sent with size {}", i, curr_size);
+            std::string str(msg_size, 'a');
+            dbg_default_info("{} messages sent with size {}", i, msg_size);
+
+            ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(str.c_str(), str.length()));
             cs.do_send(i, [&o, &vcs_ec, &server_id]() { return std::move(vcs_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
         }
         free(bbuf);

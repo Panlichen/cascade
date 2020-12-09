@@ -2,15 +2,16 @@
 #include <cascade/object.hpp>
 #include <derecho/core/derecho.hpp>
 #include <derecho/utils/logger.hpp>
+#include <fstream>
 #include <iostream>
 #include <list>
 #include <memory>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <stdlib.h>
-#include <fstream>
 #include <sstream>
+#include <stdlib.h>
+#include <string>
 #include <strings.h>
 #include <sys/socket.h>
 #include <tuple>
@@ -106,55 +107,6 @@ void wait_for_shutdown(int port) {
     close(server_fd);
 }
 
-class PerfCascadeWatcher : public CascadeWatcher<uint64_t, ObjectWithUInt64Key, &ObjectWithUInt64Key::IK, &ObjectWithUInt64Key::IV> {
-public:
-    // @override
-    virtual void operator()(derecho::subgroup_id_t sid,
-                            const uint32_t shard_id,
-                            const uint64_t& key,
-                            const ObjectWithUInt64Key& value,
-                            void* cascade_context) {
-        dbg_default_info("Watcher is called with\n\tsubgroup id = {},\n\tshard number = {},\n\tkey = {},\n\tvalue = [hidden].", sid, shard_id, key);
-    }
-};
-
-int do_server() {
-    dbg_default_info("Starting cascade sender.");
-
-    /** 1 - group building blocks*/
-    derecho::CallbackSet callback_set{
-            nullptr,  // delivery callback
-            nullptr,  // local persistence callback
-            nullptr   // global persistence callback
-    };
-    derecho::SubgroupInfo si{
-            derecho::DefaultSubgroupAllocator({{std::type_index(typeid(WPCSU)),
-                                                derecho::one_subgroup_policy(derecho::flexible_even_shards("WPCSU"))},
-                                               {std::type_index(typeid(WPCSS)),
-                                                derecho::one_subgroup_policy(derecho::flexible_even_shards("WPCSS"))}})};
-    PerfCascadeWatcher pcw;
-    auto wpcsu_factory = [&pcw](persistent::PersistentRegistry* pr, derecho::subgroup_id_t) {
-        return std::make_unique<WPCSU>(pr, &pcw);
-    };
-    auto wpcss_factory = [&pcw](persistent::PersistentRegistry* pr, derecho::subgroup_id_t) {
-        return std::make_unique<WPCSS>(pr);  // TODO: pcw is for uint key, ignore it for now.
-    };
-    /** 2 - create group */
-    derecho::Group<WPCSU, WPCSS> group(callback_set, si, {&pcw} /*deserialization manager*/,
-                                       std::vector<derecho::view_upcall_t>{},
-                                       wpcsu_factory, wpcss_factory);
-
-    /** 3 - telnet server for shutdown */
-    int sport = SHUTDOWN_SERVER_PORT;
-    if(derecho::hasCustomizedConfKey("CASCADE_PERF/shutdown_port")) {
-        sport = derecho::getConfUInt16("CASCADE_PERF/shutdown_port");
-    }
-    wait_for_shutdown(sport);
-    group.barrier_sync();
-    group.leave();
-    return 0;
-}
-
 struct client_states {
     // 1. transmittion depth for throttling the sender
     //    0 for unlimited.
@@ -197,6 +149,7 @@ struct client_states {
         // deallocated timestamp space
         delete this->send_tss;
         delete this->recv_tss;
+        cout << "destructor done\n";
     }
 
     // thread
@@ -237,15 +190,20 @@ struct client_states {
                 }
                 // log time
                 this->recv_tss[future_counter++] = get_time_us();
+                if(future_counter > 0) {
+                    dbg_default_info("{} messages get future", future_counter);
+                }
                 // post tx slot semaphore
                 if(this->max_pending_ops > 0) {
                     this->idle_tx_slot_cnt.fetch_add(1);
                     this->idle_tx_slot_cv.notify_all();
+                    dbg_default_info("add idle_tx_slot_cnt: {}", idle_tx_slot_cnt.load());
                 }
             }
 
             // shutdown polling thread.
             if(future_counter == this->num_messages) {
+                dbg_default_info("at last {} messages get future", future_counter);
                 break;
             }
         }
@@ -256,6 +214,11 @@ struct client_states {
     void wait_poll_all() {
         if(this->poll_thread.joinable()) {
             this->poll_thread.join();
+            dbg_default_info("join poll_thread successfully");
+        }
+        if(this->wait_stability_frontier_thread.joinable()) {
+            this->wait_stability_frontier_thread.join();
+            dbg_default_info("join wait_stability_frontier_thread successfully");
         }
     }
 
@@ -264,6 +227,7 @@ struct client_states {
         // wait for tx slot semaphore
         if(this->max_pending_ops > 0) {
             std::unique_lock<std::mutex> idle_tx_slot_lck(this->idle_tx_slot_mutex);
+            dbg_default_info("before sub idle_tx_slot_cnt: {}", idle_tx_slot_cnt.load());
             this->idle_tx_slot_cv.wait(idle_tx_slot_lck, [this]() { return this->idle_tx_slot_cnt > 0; });
             this->idle_tx_slot_cnt.fetch_sub(1);
             idle_tx_slot_lck.unlock();
@@ -329,7 +293,9 @@ int do_client(int argc, char** args) {
     const char* test_type = args[0];
     const uint64_t num_messages = std::stoi(args[1]);
     const int is_wpcss = std::stoi(args[2]);
+    // const uint64_t max_pending_ops = (argc >= 4) ? std::stoi(args[3]) : derecho::getConfUInt32(CONF_DERECHO_P2P_WINDOW_SIZE);
     const uint64_t max_pending_ops = (argc >= 4) ? std::stoi(args[3]) : 0;
+    cout << "using max_pending_ops " << max_pending_ops << endl;
 
     if(strcmp(test_type, "put") != 0) {
         std::cout << "TODO:" << test_type << " not supported yet." << std::endl;
@@ -349,42 +315,45 @@ int do_client(int argc, char** args) {
         }
         cout << "msg_size: " << msg_size << endl;
         struct client_states cs(max_pending_ops, num_messages, msg_size);
-        char* bbuf = (char*)malloc(msg_size);
-        bzero(bbuf, msg_size);
 
         ExternalClientCaller<WPCSS, std::remove_reference<decltype(group)>::type>& wpcss_ec = group.get_subgroup_caller<WPCSS>();
         auto members = group.template get_shard_members<WPCSS>(0, 0);
         node_id_t server_id = members[my_node_id % members.size()];
-        std::ifstream inFile("/root/lpz/qwe/cascade/trace_0214.csv", std::ios::in);
+        std::ifstream inFile("/root/lcpan/cascade/trace_0214.csv", std::ios::in);
         std::string lineStr;
         getline(inFile, lineStr);
         uint64_t message_index = 0;
-        
-        while (getline(inFile, lineStr))
-        {
+
+        while(getline(inFile, lineStr)) {
+            cout << "processing line " << lineStr << endl;
             std::vector<std::string> fields;
             std::stringstream ss(lineStr);
             std::string str;
-            while (getline(ss, str, ',')){
+            while(getline(ss, str, ',')) {
                 fields.push_back(str);
             }
             int timestamp = atoi(fields[1].c_str());
             // sleep(timestamp);
-            int file_size = atoi(fields[0].c_str());
+            size_t file_size = atoi(fields[0].c_str());
+            // file_size = msg_size;
             // cout << "time: " << timestamp << endl;
             cout << "file size: " << file_size << endl;
             // if(file_size == 98118){
             //     break;
             // }
 
-            if(file_size < msg_size){
-                ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
+            if(file_size < msg_size) {
+                // TODO: fuck, OK, but why cannot use file_size
+                // char* bbuf = (char*)malloc(msg_size);
+                // bzero(bbuf, msg_size);
+                std::string str(file_size, 'a');
+                ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(str.c_str(), str.length()));
                 cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                 message_index++;
+                // free(bbuf);
                 cout << " 1message index: " << message_index << endl;
-            }else{
-                 while (file_size > msg_size)
-                {
+            } else {
+                while(file_size > msg_size) {
                     // for (int i = 0; i < 60; i++)
                     // {
                     //     ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
@@ -394,28 +363,26 @@ int do_client(int argc, char** args) {
                     //     cout << " 2message index: " << message_index << endl;
                     // }
                     // break;
+                    char* bbuf = (char*)malloc(msg_size);
+                    bzero(bbuf, msg_size);
                     ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
                     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                     file_size -= msg_size;
                     message_index++;
                     cout << " 2message index: " << message_index << endl;
+                    free(bbuf);
                 }
-                if (file_size > 0)
-                {
-                    // ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
-                    ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+                if(file_size > 0) {
+                    std::string str(file_size, 'a');
+                    ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects),  Blob(str.c_str(), str.length()));
                     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                     message_index++;
                     cout << " 3message index: " << message_index << endl;
                 }
-                
             }
-
-            
         }
         std::cout << "MESSGAE NUMBER: " << message_index << std::endl;
         std::cout << "I AM freeing" << std::endl;
-        free(bbuf);
         std::cout << "I AM waiting" << std::endl;
         cs.wait_poll_all();
         std::cout << "I AM printing" << std::endl;
@@ -446,7 +413,7 @@ int do_client(int argc, char** args) {
 }
 
 void print_help(std::ostream& os, const char* bin) {
-    os << "USAGE:" << bin << " [derecho-config-list --] <client|sender> args..." << std::endl;
+    os << "USAGE:" << bin << " [derecho-config-list --] <client> args..." << std::endl;
     os << "    client args: <test_type> <num_messages> <is_wpcss> [max_pending_ops]" << std::endl;
     os << "        test_type := [put|get]" << std::endl;
     os << "        max_pending_ops is the maximum number of pending operations allowed. Default is unlimited." << std::endl;
@@ -478,9 +445,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if(strcmp(argv[first_arg_idx], "sender") == 0) {
-        return do_server();
-    } else if(strcmp(argv[first_arg_idx], "client") == 0) {
+    if(strcmp(argv[first_arg_idx], "client") == 0) {
         if((argc - first_arg_idx) < 4) {
             std::cerr << "Invalid client args." << std::endl;
             print_help(std::cerr, argv[0]);

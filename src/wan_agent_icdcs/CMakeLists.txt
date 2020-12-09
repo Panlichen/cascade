@@ -15,3 +15,7 @@ add_custom_command(TARGET perf_with_wan_icdcs POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/icdcs_cfg
     ${CMAKE_CURRENT_BINARY_DIR}/icdcs_cfg
 )
+add_custom_command(TARGET perf_with_wan_icdcs POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/icdcs_cfg_local_test
+    ${CMAKE_CURRENT_BINARY_DIR}/icdcs_cfg_local_test
+)

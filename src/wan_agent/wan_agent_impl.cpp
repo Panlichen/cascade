@@ -290,7 +290,7 @@ void MessageSender::recv_ack_loop() {
     log_enter_func();
     struct epoll_event events[EPOLL_MAXEVENTS];
     while(!thread_shutdown.load()) {
-        std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+        // std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
         int n = epoll_wait(epoll_fd_recv_ack, events, EPOLL_MAXEVENTS, -1);
         for(int i = 0; i < n; i++) {
             if(events[i].events & EPOLLIN) {
@@ -307,7 +307,7 @@ void MessageSender::recv_ack_loop() {
             }
         }
     }
-    std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+    // std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
     log_exit_func();
 }
 void MessageSender::predicate_calculation() {
@@ -322,10 +322,10 @@ void MessageSender::predicate_calculation() {
         pair_ve.push_back(std::make_pair(it->first, it->second.load()));
     }
     int* arr = &value_ve[0];
-    for(int i = 1; i < (int)value_ve.size(); i++) {
-        std::cout << arr[i] << " ";
-    }
-    std::cout << std::endl;
+    // for(int i = 1; i < (int)value_ve.size(); i++) {
+    //     std::cout << arr[i] << " ";
+    // }
+    // std::cout << std::endl;
     int val = predicate(5, arr);
     log_debug("predicate val is {}", val);
     log_debug("Stability Frontier key is : {}, value is {}", pair_ve[val - 1].first, pair_ve[val - 1].second);
@@ -349,7 +349,7 @@ void MessageSender::send_msg_loop() {
     log_enter_func();
     struct epoll_event events[EPOLL_MAXEVENTS];
     while(!thread_shutdown.load()) {
-        std::cout << "in send_msg_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+        // std::cout << "in send_msg_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
         std::unique_lock<std::mutex> lock(mutex);
         not_empty.wait(lock, [this]() { return size > 0; });
         // has item on the queue to send
@@ -407,7 +407,7 @@ void MessageSender::send_msg_loop() {
         }
         lock.unlock();
     }
-    std::cout << "in send_msg_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+    // std::cout << "in send_msg_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
     log_exit_func();
 }
 

@@ -817,13 +817,13 @@ std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK
     }
 
     node_id_t my_id = getConfUInt32(CONF_DERECHO_LOCAL_ID);
-    dbg_default_info("My id is {}", my_id);
+    dbg_default_trace("My id is {}", my_id);
 
     if(wan_sender_in_my_shard == my_id) {
-        dbg_default_info("I am the node with lowest shard_rank in my shard, I'll send to WanAgentServers");
+        dbg_default_trace("I am the node with lowest shard_rank in my shard, I'll send to WanAgentServers");
         do_wan_agent_send(value);
     } else {
-        dbg_default_info("I'll tell the node with lowest shard_rank in my shard to send to WanAgentServers");
+        dbg_default_trace("I'll tell the node with lowest shard_rank in my shard to send to WanAgentServers");
         /* TODO: Observed when set_member_selection_policy to be 'LastMember' in client, put may stuck. */
         subgroup_handle.template p2p_send<RPC_NAME(do_wan_agent_send)>(wan_sender_in_my_shard, value);
     }
@@ -841,7 +841,7 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::do_wan_agent_send(const VT& 
     size_t byte_size = value.bytes_size();
     char* buffer = static_cast<char*>(malloc(byte_size));
     size_t actual_size = value.to_bytes(buffer);
-    std::cout << "Alloc size: " << byte_size << ", actual size: " << actual_size << std::endl;
+    // std::cout << "Alloc size: " << byte_size << ", actual size: " << actual_size << std::endl;
     if(byte_size != actual_size) {
         throw std::runtime_error("to_bytes() and bytes_size() return different size");
     }
