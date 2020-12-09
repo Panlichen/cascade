@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <stdlib.h>
+#include <time.h> 
 #include <netinet/in.h>
 
 using namespace derecho::cascade;
@@ -223,9 +224,12 @@ struct client_states
             std::list<derecho::rpc::QueryResults<std::tuple<persistent::version_t, uint64_t>>> my_future_queue;
             // wait for a future
             std::unique_lock<std::mutex> lck(this->future_queue_mutex);
-            this->future_queue_cv.wait(lck, [this]() { return !this->future_queue.empty(); });
+            this->future_queue_cv.wait(lck, [this]() { 
+                dbg_default_info("in waiting lambda, future_queue has length {}", future_queue.size());
+                return !this->future_queue.empty(); });
             // get all futures
             this->future_queue.swap(my_future_queue);
+            dbg_default_info("in poll_results, after swap, future_queue has length {}, my_future_queue has length {}", future_queue.size(), my_future_queue.size());
             // release lock
             lck.unlock();
 
@@ -284,6 +288,7 @@ struct client_states
         // append to future queue
         std::unique_lock<std::mutex> future_queue_lck(this->future_queue_mutex);
         this->future_queue.emplace_back(std::move(f));
+        dbg_default_info("after send, future_queue has length {}", future_queue.size());
         future_queue_lck.unlock();
         this->future_queue_cv.notify_all();
     }
@@ -358,7 +363,7 @@ int do_client(int argc, char **args)
 
     uint64_t msg_size = derecho::getConfUInt64(CONF_SUBGROUP_DEFAULT_MAX_PAYLOAD_SIZE);
     uint32_t my_node_id = derecho::getConfUInt32(CONF_DERECHO_LOCAL_ID);
-
+    // srand((unsigned)time(NULL));
     /** 2 - test both latency and bandwidth */
     if (is_persistent)
     {
