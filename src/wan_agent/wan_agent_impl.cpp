@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <sys/epoll.h>
@@ -17,6 +18,12 @@
 #include <wan_agent/logger.hpp>
 #include <wan_agent/wan_agent.hpp>
 #include <wan_agent/wan_agent_utils.hpp>
+
+inline uint64_t get_time_us() {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
 
 namespace wan_agent {
 
@@ -290,7 +297,7 @@ void MessageSender::recv_ack_loop() {
     log_enter_func();
     struct epoll_event events[EPOLL_MAXEVENTS];
     while(!thread_shutdown.load()) {
-        std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+        // std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
         int n = epoll_wait(epoll_fd_recv_ack, events, EPOLL_MAXEVENTS, -1);
         for(int i = 0; i < n; i++) {
             if(events[i].events & EPOLLIN) {
@@ -302,12 +309,13 @@ void MessageSender::recv_ack_loop() {
                     throw std::runtime_error("sequence number is out of order for site-" + std::to_string(res.site_id) + ", counter = " + std::to_string(message_counters[res.site_id].load()) + ", seqno = " + std::to_string(res.seq));
                 }
                 message_counters[res.site_id]++;
+
                 predicate_calculation();
                 // ack_keeper[res.seq * 4 + res.site_id - 1] = now_us();
             }
         }
     }
-    std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+    // std::cout << "in recv_ack_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
     log_exit_func();
 }
 void MessageSender::predicate_calculation() {
@@ -322,21 +330,36 @@ void MessageSender::predicate_calculation() {
         pair_ve.push_back(std::make_pair(it->first, it->second.load()));
     }
     int* arr = &value_ve[0];
-    for(int i = 1; i < (int)value_ve.size(); i++) {
-        std::cout << arr[i] << " ";
-    }
-    std::cout << std::endl;
+
     int val = predicate(5, arr);
     stability_frontier = pair_ve[val - 1].second;
-    stability_frontier_arrive_cv.notify_one();
-    log_debug("predicate val is {}", val);
-    log_debug("Stability Frontier key is : {}, value is {}", pair_ve[val - 1].first, pair_ve[val - 1].second);
-    log_exit_func();
-}
 
-void MessageSender::wait_stability_frontier(int sf) {
+    if((stability_frontier + 1) % 5000 == 0) {
+        sf_arrive_time_map[stability_frontier] = get_time_us();
+        for(int i = 1; i < (int)value_ve.size(); i++) {
+            std::cout << arr[i] << " ";
+        }
+        std::cout << std::endl;
+        all_sf_situation[all_sf_tics * 7] = get_time_us();
+        int tmp_idx = 1;
+        for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
+            int tmp_val = it->second(5, arr);
+            all_sf_situation[all_sf_tics * 7 + tmp_idx] = pair_ve[tmp_val - 1].second;
+            tmp_idx++;
+        }
+        all_sf_tics++;
+    }
+
+    stability_frontier_arrive_cv.notify_one();
+
+    log_exit_func();
+}  // namespace wan_agent
+
+void MessageSender::wait_stability_frontier_loop(int sf) {
     std::unique_lock<std::mutex> lock(stability_frontier_arrive_mutex);
     stability_frontier_arrive_cv.wait(lock, [this, sf]() { return stability_frontier >= sf; });
+    sf_arrive_time = get_time_us();
+    stability_frontier_set_cv.notify_one();
 }
 
 void MessageSender::enqueue(const char* payload, const size_t payload_size) {
@@ -347,7 +370,7 @@ void MessageSender::enqueue(const char* payload, const size_t payload_size) {
     tmp->message_body = (char*)malloc(payload_size);
     memcpy(tmp->message_body, payload, payload_size);
     buffer_list.push_back(*tmp);
-    size++;
+    enter_queue_time_keeper[msg_idx++] = get_time_us();
     size_mutex.unlock();
     not_empty.notify_one();
 }
@@ -356,9 +379,9 @@ void MessageSender::send_msg_loop() {
     log_enter_func();
     struct epoll_event events[EPOLL_MAXEVENTS];
     while(!thread_shutdown.load()) {
-        std::cout << "in send_msg_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+        // std::cout << "in send_msg_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
         std::unique_lock<std::mutex> lock(mutex);
-        not_empty.wait(lock, [this]() { return size > 0; });
+        not_empty.wait(lock, [this]() { return buffer_list.size() > 0; });
         // has item on the queue to send
         int n = epoll_wait(epoll_fd_send_msg, events, EPOLL_MAXEVENTS, -1);
         // log_trace("epoll returned {} sockets ready for write", n);
@@ -368,7 +391,7 @@ void MessageSender::send_msg_loop() {
                 site_id_t site_id = sockfd_to_server_site_id_map[events[i].data.fd];
                 // log_trace("send buffer is available for site {}.", site_id);
                 auto offset = last_sent_seqno[site_id] - last_all_sent_seqno;
-                if(offset == size) {
+                if(offset == buffer_list.size()) {
                     // all messages on the buffer have been sent for this site_id
                     continue;
                 }
@@ -383,8 +406,9 @@ void MessageSender::send_msg_loop() {
                 // time_keeper[curr_seqno*4+site_id-1] = now_us();
                 sock_write(events[i].data.fd, RequestHeader{curr_seqno, local_site_id, payload_size});
                 sock_write(events[i].data.fd, buffer_list.front().message_body, payload_size);
+                leave_queue_time_keeper[curr_seqno * 7 + site_id - 1000] = get_time_us();
                 // buffer_size[curr_seqno] = size;
-                log_trace("buffer has {} items in buffer", size);
+
                 last_sent_seqno[site_id] = curr_seqno;
             }
         }
@@ -407,14 +431,13 @@ void MessageSender::send_msg_loop() {
             size_mutex.lock();
             buffer_list.pop_front();
             // list_lock.lock();
-            size--;
             size_mutex.unlock();
             // list_lock.unlock();
             last_all_sent_seqno++;
         }
         lock.unlock();
     }
-    std::cout << "in send_msg_loop, thread_shutdown.load() is " << thread_shutdown.load() << std::endl;
+
     log_exit_func();
 }
 
@@ -428,7 +451,7 @@ WanAgentSender::WanAgentSender(const nlohmann::json& wan_group_config,
     std::istringstream iss(predicate_experssion);
     predicate_generator = new Predicate_Generator(iss);
     predicate = predicate_generator->get_predicate_function();
-
+    std::cout << predicate_experssion << std::endl;
     // start predicate thread.
     // predicate_thread = std::thread(&WanAgentSender::predicate_loop, this);
     for(const auto& pair : server_sites_ip_addrs_and_ports) {
@@ -445,9 +468,10 @@ WanAgentSender::WanAgentSender(const nlohmann::json& wan_group_config,
             message_counters,
             [this]() {});
     // [this]() { this->report_new_ack(); });
-
+    generate_predicate();
     recv_ack_thread = std::thread(&MessageSender::recv_ack_loop, message_sender.get());
     send_msg_thread = std::thread(&MessageSender::send_msg_loop, message_sender.get());
+
     message_sender->predicate = predicate;
 }
 
@@ -470,7 +494,38 @@ void WanAgentSender::submit_predicate(std::string key, std::string predicate_str
         message_sender->predicate = predicate;
     }
     predicate_map[key] = prl;
+    message_sender->predicate_map[key] = prl;
     // test_predicate();
+}
+
+void WanAgentSender::generate_predicate() {
+    std::string predicates[6] = {
+            "MAX($1,$2,$3,$4,$5,$6,$7)",
+            "MAX(MAX($2,$3,$4),MAX($5,$6),$7)",
+            "KTH_MIN($2,MAX($2,$3,$4),MAX($5,$6),$7)",
+            "MIN(MAX($2,$3,$4),MAX($5,$6),$7)",
+            "MIN($1,$2,$3,$4,$5,$6,$7)",
+            "KTH_MIN($4,$1,$2,$3,$4,$5,$6,$7)"};
+    std::string keys[6] = {
+            "MAX_NODE",
+            "MAX_REGION",
+            "MAJ_REGION",
+            "MIN_REGION",
+            "MIN_NODE",
+            "MAJ_NODE"};
+    for(int i = 0; i < 6; i++) {
+        submit_predicate(keys[i], predicates[i], false);
+    }
+}
+
+void WanAgentSender::set_stability_frontier(int sf) {
+    wait_sf_thread = std::thread(&MessageSender::wait_stability_frontier_loop, message_sender.get(), sf);
+}
+
+uint64_t WanAgentSender::get_stability_frontier_arrive_time() {
+    std::unique_lock<std::mutex> lock(message_sender->stability_frontier_set_mutex);
+    message_sender->stability_frontier_set_cv.wait(lock, [this]() { return message_sender->sf_arrive_time != 0; });
+    return message_sender->sf_arrive_time;
 }
 
 void WanAgentSender::change_predicate(std::string key) {
@@ -486,9 +541,6 @@ void WanAgentSender::change_predicate(std::string key) {
 
     // test_predicate();
 }
-void WanAgentSender::wait_stability_frontier(int sf) {
-    message_sender->wait_stability_frontier(sf);
-}
 
 void WanAgentSender::test_predicate() {
     int arr[6] = {0, 3, 7, 1, 5, 9};
@@ -499,18 +551,38 @@ void WanAgentSender::test_predicate() {
     int cur = predicate(5, arr);
     log_debug("current test_predicate returned: {}", cur);
 }
+void WanAgentSender::out_out_file() {
+    std::ofstream file("./enter_leave.csv");
+    if(file) {
+        file << "enter_time,s1,s2,s3,s4,s5,s6,s7\n";
+        for(int i = 0; i < message_sender->msg_idx; i++) {
+            file << message_sender->enter_queue_time_keeper[i] << "," << message_sender->leave_queue_time_keeper[i * 7] << "," << message_sender->leave_queue_time_keeper[i * 7 + 1] << "," << message_sender->leave_queue_time_keeper[i * 7 + 2] << "," << message_sender->leave_queue_time_keeper[i * 7 + 3] << "," << message_sender->leave_queue_time_keeper[i * 7 + 4] << "," << message_sender->leave_queue_time_keeper[i * 7 + 5] << "," << message_sender->leave_queue_time_keeper[i * 7 + 6] << "\n";
+        }
+    }
+    file.close();
+    std::ofstream file1("./all_sf.csv");
+    if(file1) {
+        file1 << "timestamp,ALL_REGION,ALL_SITE,MAJ_REGION,MAJ_SITE,ONE_REGION,ONE_SITE\n";
+        for(int i = 0; i < message_sender->all_sf_tics; i++) {
+            file1 << message_sender->all_sf_situation[i*7] << "," << message_sender->all_sf_situation[i*7 + 1] << "," << message_sender->all_sf_situation[i*7 + 2] << "," << message_sender->all_sf_situation[i*7 + 3] << "," << message_sender->all_sf_situation[i*7 + 4] << ","<< message_sender->all_sf_situation[i*7 + 5] << "," << message_sender->all_sf_situation[i*7 + 6] << "\n";
+        }
+    }
+    file1.close();
+}
 void WanAgentSender::shutdown_and_wait() {
     log_enter_func();
     is_shutdown.store(true);
     // report_new_ack(); // to wake up all predicate_loop threads with a pusedo "new ack"
     // predicate_thread.join();
+    out_out_file();
 
     message_sender->shutdown();
     // send_msg_thread.join();
     // recv_ack_thread.join();
-    std::cout << "send_msg_thread.joinable(): " << send_msg_thread.joinable() << ", recv_ack_thread.joinable(): " << recv_ack_thread.joinable();
+    std::cout << "send_msg_thread.joinable(): " << send_msg_thread.joinable() << ", recv_ack_thread.joinable(): " << recv_ack_thread.joinable() << std::endl;
     send_msg_thread.detach();
     recv_ack_thread.detach();
+    wait_sf_thread.detach();
     log_exit_func();
 }
 

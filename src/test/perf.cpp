@@ -372,10 +372,13 @@ int do_client(int argc, char **args)
         ExternalClientCaller<PCS, std::remove_reference<decltype(group)>::type> &pcs_ec = group.get_subgroup_caller<PCS>();
         auto members = group.template get_shard_members<PCS>(0, 0);
         node_id_t server_id = members[my_node_id % members.size()];
+        
 
         for (uint64_t i = 0; i < num_messages; i++)
         {
-            ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, msg_size));
+            int file_size = rand() % msg_size + 1;
+            std::cout << "file size : " << file_size << std::endl;
+            ObjectWithUInt64Key o(randomize_key(i) % max_distinct_objects, Blob(bbuf, file_size));
             cs.do_send(i, [&o, &pcs_ec, &server_id]() { return std::move(pcs_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
         }
         free(bbuf);

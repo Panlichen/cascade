@@ -1,16 +1,17 @@
 #include <cascade/cascade.hpp>
 #include <cascade/object.hpp>
+#include <chrono>
 #include <derecho/core/derecho.hpp>
 #include <derecho/utils/logger.hpp>
+#include <fstream>
 #include <iostream>
 #include <list>
 #include <memory>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <stdlib.h>
-#include <fstream>
 #include <sstream>
+#include <stdlib.h>
 #include <strings.h>
 #include <sys/socket.h>
 #include <tuple>
@@ -24,6 +25,7 @@ using WPCSU = WANPersistentCascadeStore<uint64_t, ObjectWithUInt64Key, &ObjectWi
 using WPCSS = WANPersistentCascadeStore<std::string, ObjectWithStringKey, &ObjectWithStringKey::IK, &ObjectWithStringKey::IV, ST_FILE>;
 
 #define SHUTDOWN_SERVER_PORT (2300)
+#define SLEEP_GRANULARITY_US (50)
 // timing unit.
 inline uint64_t get_time_us() {
     struct timespec ts;
@@ -183,9 +185,9 @@ struct client_states {
     // derecho::rpc::QueryResults<int> sf_future = NULL;
     // constructor:
     client_states(uint64_t _max_pending_ops, uint64_t _num_messages, uint64_t _message_size, uint64_t _target_sf) : max_pending_ops(_max_pending_ops),
-                                                                                               num_messages(_num_messages),
-                                                                                               message_size(_message_size),
-                                                                                               target_sf(_target_sf) {
+                                                                                                                    num_messages(_num_messages),
+                                                                                                                    message_size(_message_size),
+                                                                                                                    target_sf(_target_sf) {
         idle_tx_slot_cnt = _max_pending_ops;
         // allocated timestamp space and zero them out
         this->send_tss = new uint64_t[_num_messages];
@@ -194,7 +196,7 @@ struct client_states {
         bzero(this->recv_tss, sizeof(uint64_t) * _num_messages);
         // start polling thread
         this->poll_thread = std::thread(&client_states::poll_results, this);
-        this->wait_stability_frontier_thread = std::thread(&client_states::waiting_stability_forntier, this);
+        // this->wait_stability_frontier_thread = std::thread(&client_states::waiting_stability_forntier, this);
     }
 
     // destructor:
@@ -206,25 +208,29 @@ struct client_states {
 
     // thread
     // waiting stability frontier
-    void waiting_stability_forntier() {
-        pthread_setname_np(pthread_self(), "waiting_stability_forntier");
-        dbg_default_trace("waiting stability forntier thread started.");
-        std::list<derecho::rpc::QueryResults<int>> my_wait_sf_queue;
-        std::unique_lock<std::mutex> lck(this->wait_sf_mutex);
-        this->wait_sf_cv.wait(lck, [this]() { return !this->wait_sf_queue.empty(); });
-        lck.unlock();
-         // wait for all futures
-            for(auto& f : wait_sf_queue) {
-                derecho::rpc::QueryResults<int>::ReplyMap& replies = f.get();
-                for(auto& reply_pair : replies) {
-                    auto r = reply_pair.second.get();
-                }
-                dbg_default_trace("stability arrived");
-                uint64_t sf_arrive_time = get_time_us();
-                cout << "stability frontier arrived using (us) : " << sf_arrive_time - send_tss[0] << endl;
-            }
-            dbg_default_trace("wait sf thread shutdown.");
-    }
+    // void waiting_stability_forntier() {
+    //     pthread_setname_np(pthread_self(), "waiting_stability_forntier");
+    //     dbg_default_trace("waiting stability forntier thread started.");
+    //     cout << "waiting stability forntier thread started.\n";
+    //     std::list<derecho::rpc::QueryResults<int>> my_wait_sf_queue;
+    //     std::unique_lock<std::mutex> lck(this->wait_sf_mutex);
+    //     this->wait_sf_cv.wait(lck, [this]() { return !this->wait_sf_queue.empty(); });
+    //     lck.unlock();
+    //      // wait for sf future
+
+    //     for(auto& f : wait_sf_queue) {
+    //         cout << "getting a future.\n";
+    //         derecho::rpc::QueryResults<int>::ReplyMap& replies = f.get();
+    //         for(auto& reply_pair : replies) {
+    //             auto r = reply_pair.second.get();
+    //             cout << "reply got :" << r << endl;
+    //         }
+    //         dbg_default_trace("stability arrived");
+    //         uint64_t sf_arrive_time = get_time_us();
+    //         cout << "stability frontier arrived using (us) : " << sf_arrive_time - send_tss[0] << endl;
+    //     }
+    //     dbg_default_trace("wait sf thread shutdown.");
+    // }
     // thread
     // polling thread
     void poll_results() {
@@ -270,20 +276,19 @@ struct client_states {
         if(this->poll_thread.joinable()) {
             this->poll_thread.join();
         }
-        if(this->wait_stability_frontier_thread.joinable()){
+        if(this->wait_stability_frontier_thread.joinable()) {
             this->wait_stability_frontier_thread.join();
         }
     }
 
     // do_wait_sf
-    void do_wait_sf(const std::function<derecho::rpc::QueryResults<int>()>& func){
-        auto f = func();
-        std::unique_lock<std::mutex> wait_sf_lck(this->wait_sf_mutex);
-        this->wait_sf_queue.emplace_back(std::move(f));
-        wait_sf_lck.unlock();
-        this->wait_sf_cv.notify_all();
-    }
-
+    // void do_wait_sf(const std::function<derecho::rpc::QueryResults<int>()>& func){
+    //     auto f = func();
+    //     std::unique_lock<std::mutex> wait_sf_lck(this->wait_sf_mutex);
+    //     this->wait_sf_queue.emplace_back(std::move(f));
+    //     wait_sf_lck.unlock();
+    //     this->wait_sf_cv.notify_all();
+    // }
 
     // do_send
     void do_send(uint64_t msg_cnt, const std::function<derecho::rpc::QueryResults<std::tuple<persistent::version_t, uint64_t>>()>& func) {
@@ -312,7 +317,8 @@ struct client_states {
         }
         */
 
-        uint64_t total_bytes = this->num_messages * this->message_size;
+        // uint64_t total_bytes = this->num_messages * this->message_size;
+        uint64_t total_bytes = 4159899129;
         uint64_t timespan_us = this->recv_tss[this->num_messages - 1] - this->send_tss[0];
         double thp_MiBps, thp_ops, avg_latency_us, std_latency_us;
         {
@@ -351,13 +357,14 @@ inline uint64_t randomize_key(uint64_t& in) {
 }
 
 int do_client(int argc, char** args) {
-    const uint64_t max_distinct_objects = 409600;
+    const uint64_t max_distinct_objects = 517295;
     const char* test_type = args[0];
     const uint64_t num_messages = std::stoi(args[1]);
     const int is_wpcss = std::stoi(args[2]);
-    const int target_sf = std::stoi(args[3]);
     const uint64_t max_pending_ops = (argc >= 5) ? std::stoi(args[4]) : 0;
-
+    int target_sf = num_messages - 1;
+    int expected_mps = 592;
+    // target_sf = 10000;
 
     if(strcmp(test_type, "put") != 0) {
         std::cout << "TODO:" << test_type << " not supported yet." << std::endl;
@@ -375,6 +382,7 @@ int do_client(int argc, char** args) {
         if(derecho::hasCustomizedConfKey("SUBGROUP/WPCSS/max_payload_size")) {
             msg_size = derecho::getConfUInt64("SUBGROUP/WPCSS/max_payload_size") - 128;
         }
+        // msg_size = 10240;
         cout << "msg_size: " << msg_size << endl;
         struct client_states cs(max_pending_ops, num_messages, msg_size, target_sf);
         char* bbuf = (char*)malloc(msg_size);
@@ -383,59 +391,93 @@ int do_client(int argc, char** args) {
         ExternalClientCaller<WPCSS, std::remove_reference<decltype(group)>::type>& wpcss_ec = group.get_subgroup_caller<WPCSS>();
         auto members = group.template get_shard_members<WPCSS>(0, 0);
         node_id_t server_id = members[my_node_id % members.size()];
-        std::ifstream inFile("/root/lpz/icdcs_cascade/cascade/trace_0214.csv", std::ios::in);
+        std::ifstream inFile("/root/lpz/icdcs_cascade/cascade/trace_09_20.csv", std::ios::in);
         std::string lineStr;
         getline(inFile, lineStr);
         uint64_t message_index = 0;
-        cs.do_wait_sf([&target_sf, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(wait_for_stability_frontier)>(server_id, target_sf)); });
+        // cs.do_wait_sf([&target_sf, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(wait_for_stability_frontier)>(server_id, target_sf)); });
+        wpcss_ec.p2p_send<RPC_NAME(start_wanagent)>(server_id);
 
-        while (getline(inFile, lineStr))
-        {
+        wpcss_ec.p2p_send<RPC_NAME(set_stability_frontier)>(server_id, target_sf);
+        uint64_t start_time = get_time_us();
+        cout << "start time" << start_time << endl;
+        int idx = 0;
+        /** the fixed message size with flow control**/
+        while(idx != num_messages){
+            uint64_t now_time = get_time_us();
+            while ((now_time-start_time)/1000000.0*expected_mps > idx && idx != num_messages) {
+                ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+                cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
+                idx++;
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_GRANULARITY_US));
+        }
+
+        /** send with trace **/
+        /*
+        while(getline(inFile, lineStr)) {
             std::vector<std::string> fields;
             std::stringstream ss(lineStr);
             std::string str;
-            while (getline(ss, str, ',')){
+            while(getline(ss, str, ',')) {
                 fields.push_back(str);
             }
             int timestamp = atoi(fields[1].c_str());
-            // sleep(timestamp);
-            int file_size = atoi(fields[0].c_str());
             // cout << "time: " << timestamp << endl;
-            cout << "file size: " << file_size << endl;
-            file_size = msg_size;
-            if(file_size < msg_size){
-                ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
+            sleep(timestamp);
+            int file_size = atoi(fields[0].c_str());
+            // cout << "file size: " << file_size << endl;
+            // file_size = msg_size;
+
+            if(file_size < msg_size) {
+                // ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
+                ObjectWithStringKey o(std::to_string(message_index), Blob(bbuf, file_size));
                 cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                 message_index++;
-                cout << " 1message index: " << message_index << endl;
-            }else{
-                 while (file_size > msg_size)
-                {
-                    ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+                if(message_index % 10000 == 0) {
+                    cout << " message index: " << message_index << endl;
+                }
+                // cout << " 1message index: " << message_index << endl;
+            } else {
+                while(file_size > msg_size) {
+                    // ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+                    ObjectWithStringKey o(std::to_string(message_index), Blob(bbuf, msg_size));
                     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                     file_size -= msg_size;
                     message_index++;
-                    cout << " 2message index: " << message_index << endl;
+                    if(message_index % 10000 == 0) {
+                        cout << " message index: " << message_index << endl;
+                    }
+                    // cout << " 2message index: " << message_index << endl;
                 }
-                if (file_size > 0)
-                {
-                    ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
+                if(file_size > 0) {
+                    // ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
+                    ObjectWithStringKey o(std::to_string(message_index), Blob(bbuf, file_size));
                     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
                     message_index++;
-                    cout << " 3message index: " << message_index << endl;
+                    if(message_index % 10000 == 0) {
+                        cout << " message index: " << message_index << endl;
+                    }
+                    // cout << " 3message index: " << message_index << endl;
                 }
-                
             }
-
-            
         }
-        std::cout << "MESSGAE NUMBER: " << message_index << std::endl;
-        std::cout << "I AM freeing" << std::endl;
+        */
         free(bbuf);
-        std::cout << "I AM waiting" << std::endl;
         cs.wait_poll_all();
-        std::cout << "I AM printing" << std::endl;
         cs.print_statistics();
+        auto sf_results = wpcss_ec.p2p_send<RPC_NAME(get_stability_frontier_arrive_time)>(server_id);
+        auto& sf_replies = sf_results.get();
+        uint64_t sf_arrive_time;
+        for(auto& reply_pair : sf_replies) {
+            sf_arrive_time = reply_pair.second.get();
+        }
+        // cout << "stability frontier arrived using (us) : " << sf_arrive_time - cs.send_tss[0] << endl;
+        cout << "start time: " << start_time << endl;
+        // cout << "sf_arrive_time: " << sf_arrive_time << endl;
+        // cout << "stability frontier arrived using (us) : " << sf_arrive_time - start_time << endl;
+        // cout << "now from stability frontier arrived using (us) : " << get_time_us() - sf_arrive_time << endl;
+
     } else {
         // if(derecho::hasCustomizedConfKey("SUBGROUP/WPCSU/max_payload_size")) {
         //     msg_size = derecho::getConfUInt64("SUBGROUP/WPCSU/max_payload_size") - 128;

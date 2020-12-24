@@ -817,20 +817,25 @@ std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK
     }
 
     node_id_t my_id = getConfUInt32(CONF_DERECHO_LOCAL_ID);
-    dbg_default_info("My id is {}", my_id);
+    // dbg_default_info("My id is {}", my_id);
 
     if(wan_sender_in_my_shard == my_id) {
-        dbg_default_info("I am the node with lowest shard_rank in my shard, I'll send to WanAgentServers");
+        // dbg_default_info("I am the node with lowest shard_rank in my shard, I'll send to WanAgentServers");
         do_wan_agent_send(value);
     } else {
-        dbg_default_info("I'll tell the node with lowest shard_rank in my shard to send to WanAgentServers");
+        // dbg_default_info("I'll tell the node with lowest shard_rank in my shard to send to WanAgentServers");
         /* TODO: Observed when set_member_selection_policy to be 'LastMember' in client, put may stuck. */
         subgroup_handle.template p2p_send<RPC_NAME(do_wan_agent_send)>(wan_sender_in_my_shard, value);
     }
 
     return ret;
 }
-
+template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
+void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::start_wanagent(){
+    if(!wan_agent_sender) {
+        init_wan_config();
+    }
+}
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
 void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::do_wan_agent_send(const VT& value) {
     if(!wan_agent_sender) {
@@ -841,7 +846,7 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::do_wan_agent_send(const VT& 
     size_t byte_size = value.bytes_size();
     char* buffer = static_cast<char*>(malloc(byte_size));
     size_t actual_size = value.to_bytes(buffer);
-    std::cout << "Alloc size: " << byte_size << ", actual size: " << actual_size << std::endl;
+    // std::cout << "Alloc size: " << byte_size << ", actual size: " << actual_size << std::endl;
     if(byte_size != actual_size) {
         throw std::runtime_error("to_bytes() and bytes_size() return different size");
     }
@@ -868,9 +873,17 @@ void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::do_wan_agent_send(const VT& 
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
-int WANPersistentCascadeStore<KT, VT, IK, IV, ST>::wait_for_stability_frontier(int sf){
-    wan_agent_sender->wait_stability_frontier(sf);
-    return 1;
+void WANPersistentCascadeStore<KT, VT, IK, IV, ST>::set_stability_frontier(int sf){
+    // wan_agent_sender->wait_stability_frontier(sf);
+    dbg_default_info("waiting for {}", sf);
+    wan_agent_sender->set_stability_frontier(sf);
+}
+
+template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
+uint64_t WANPersistentCascadeStore<KT, VT, IK, IV, ST>::get_stability_frontier_arrive_time(){
+    uint64_t res = wan_agent_sender->get_stability_frontier_arrive_time();
+    wan_agent_sender->shutdown_and_wait();
+    return res;
 }
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>

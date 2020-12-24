@@ -11,6 +11,7 @@
 #include <thread>
 #include <wan_agent/wan_agent_type_definitions.hpp>
 // #include <wan_agent/wan_agent_utils.hpp>
+#include "pre_driver.hpp"
 #include "predicate_generator.hpp"
 namespace wan_agent {
 
@@ -229,15 +230,18 @@ private:
     int epoll_fd_send_msg;
     int epoll_fd_recv_ack;
 
-    // wait for certaion stability frontier
-    int stability_frontier = 0;
+    int non_gccjit_calculation(int* seq_vec);
     std::mutex stability_frontier_arrive_mutex;
     std::condition_variable stability_frontier_arrive_cv;
+    bool sf_flag = false;
+    // if program can work the below 3 lines can be deleted
+    // int target_sf = -1;
 
     const size_t n_slots;
     // size_t head = 0;
     // size_t tail = 0;
-    size_t size = 0;
+    // size_t size = 0;
+    
     // std::vector<std::unique_ptr<char[]>> buf;
     // mutex and condition variables for producer-consumer problem
     std::mutex mutex;
@@ -253,12 +257,34 @@ private:
     const ReportACKFunc report_new_ack;
 
     std::atomic<bool> thread_shutdown;
+    const int N_MSG = 520000;
 
 public:
+    std::vector<pre_operation> operations;
     // uint64_t *buffer_size = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
-    // uint64_t *time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 4 * N_MSG));
-    // uint64_t *ack_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 4 * N_MSG));
+    uint64_t *leave_queue_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 7 * N_MSG));
+    uint64_t *enter_queue_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
+    // wait for certaion stability frontier
+    int stability_frontier = 0;
+    uint64_t* all_sf_situation = static_cast<uint64_t*>(malloc(sizeof(uint64_t) * 40000));
+    // index for sf_time_keeper;
+    int all_sf_tics = 0;
+    int msg_idx = 0;
+    // uint64_t *sf_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 80000));
+    // index for sf_time_keeper;
+    // int sf_timer_tics = 0;
+    std::map<uint64_t, uint64_t> sf_arrive_time_map;
+    std::map<uint64_t, uint64_t> remote_all_send_map;
     predicate_fn_type predicate;
+    std::map<std::string, predicate_fn_type> predicate_map;
+    uint64_t sf_arrive_time = 0;
+
+    double sf_calculation_cost = 0;
+    double transfer_data_cost = 0;
+    double get_size_cost = 0;
+
+    std::mutex stability_frontier_set_mutex;
+    std::condition_variable stability_frontier_set_cv;
     MessageSender(const site_id_t& local_site_id,
                   const std::map<site_id_t, std::pair<ip_addr_t, uint16_t>>& server_sites_ip_addrs_and_ports,
                   const size_t& n_slots, const size_t& max_payload_size,
@@ -269,7 +295,9 @@ public:
     void enqueue(const char* payload, const size_t payload_size);
     void send_msg_loop();
     void predicate_calculation();
-    void wait_stability_frontier(int sf);
+    void wait_stability_frontier_loop(int sf);
+    void sf_time_checker_loop();
+    // void set_stability_frontier(int sf);
     void shutdown() {
         thread_shutdown.store(true);
         std::cout << "set thread_shutdown to " << thread_shutdown.load() << " in MessageSender shutdown\n";
@@ -285,7 +313,6 @@ private:
     // std::thread predicate_thread;
     /** the conditional variable for stability waiting*/
 
-    
     /**
          * predicted_lambda is called when an acknowledgement is received.
          */
@@ -294,13 +321,13 @@ private:
     std::unique_ptr<MessageSender> message_sender;
     std::thread recv_ack_thread;
     std::thread send_msg_thread;
-
+    std::thread wait_sf_thread;
+    uint64_t all_start_time;
     std::map<site_id_t, std::atomic<uint64_t>> message_counters;
     std::string predicate_experssion;
     Predicate_Generator* predicate_generator;
     predicate_fn_type predicate;
     std::map<std::string, predicate_fn_type> predicate_map;
-
 
 public:
     WanAgentSender(const nlohmann::json& wan_group_config,
@@ -323,7 +350,7 @@ public:
          * report new ack. Implementation should call this to wake up the predicate thread.
          */
     void report_new_ack();
-
+    void out_out_file();
     /**
          * send the message
          */
@@ -333,10 +360,12 @@ public:
     }
     void submit_predicate(std::string key, std::string predicate_str, bool inplace);
 
+    void generate_predicate();
+
     void change_predicate(std::string key);
 
-    void wait_stability_frontier(int sf);
-
+    uint64_t get_stability_frontier_arrive_time();
+    void set_stability_frontier(int sf);
     void test_predicate();
     /**
          * return a moveable conter table
