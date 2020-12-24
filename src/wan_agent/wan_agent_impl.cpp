@@ -570,6 +570,7 @@ void WanAgentSender::out_out_file() {
     file1.close();
 }
 void WanAgentSender::shutdown_and_wait() {
+    std::cout << "all done! " << get_time_us() << std::endl;
     log_enter_func();
     is_shutdown.store(true);
     // report_new_ack(); // to wake up all predicate_loop threads with a pusedo "new ack"
