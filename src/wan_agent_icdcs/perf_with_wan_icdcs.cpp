@@ -402,6 +402,14 @@ int do_client(int argc, char** args) {
         uint64_t start_time = get_time_us();
         cout << "start time" << start_time << endl;
         int idx = 0;
+
+        /**fixed number of message**/
+        while(idx != num_messages) {
+            ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+            cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
+            idx++;
+        }
+
         /** the fixed message size with flow control**/
         // while(idx != num_messages){
         //     uint64_t now_time = get_time_us();
@@ -414,7 +422,7 @@ int do_client(int argc, char** args) {
         // }
 
         /** send with trace **/
-        
+        /*
         while(getline(inFile, lineStr)) {
             std::vector<std::string> fields;
             std::stringstream ss(lineStr);
@@ -462,7 +470,7 @@ int do_client(int argc, char** args) {
                 }
             }
         }
-        
+        */
         free(bbuf);
         cs.wait_poll_all();
         cs.print_statistics();

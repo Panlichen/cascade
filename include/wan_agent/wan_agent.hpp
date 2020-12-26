@@ -266,6 +266,8 @@ public:
     uint64_t *enter_queue_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
     // wait for certaion stability frontier
     int stability_frontier = 0;
+    // wait for what sf?
+    int wait_target_sf = -1;
     uint64_t* all_sf_situation = static_cast<uint64_t*>(malloc(sizeof(uint64_t) * 40000));
     // index for sf_time_keeper;
     int all_sf_tics = 0;
@@ -277,6 +279,7 @@ public:
     std::map<uint64_t, uint64_t> remote_all_send_map;
     predicate_fn_type predicate;
     std::map<std::string, predicate_fn_type> predicate_map;
+    std::map<std::string, uint64_t> predicate_arrive_map;
     uint64_t sf_arrive_time = 0;
 
     double sf_calculation_cost = 0;

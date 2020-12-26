@@ -1,13 +1,13 @@
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <netinet/in.h>
 #include <nlohmann/json.hpp>
 #include <sstream>
-#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <sys/epoll.h>
@@ -333,21 +333,32 @@ void MessageSender::predicate_calculation() {
 
     int val = predicate(5, arr);
     stability_frontier = pair_ve[val - 1].second;
+    /**general recording all sf at every 5000 message**/
+    // if((stability_frontier + 1) % 5000 == 0) {
+    //     sf_arrive_time_map[stability_frontier] = get_time_us();
+    //     for(int i = 1; i < (int)value_ve.size(); i++) {
+    //         std::cout << arr[i] << " ";
+    //     }
+    //     std::cout << std::endl;
+    //     all_sf_situation[all_sf_tics * 7] = get_time_us();
+    //     int tmp_idx = 1;
+    //     for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
+    //         int tmp_val = it->second(5, arr);
+    //         all_sf_situation[all_sf_tics * 7 + tmp_idx] = pair_ve[tmp_val - 1].second;
+    //         tmp_idx++;
+    //     }
+    //     all_sf_tics++;
+    // }
 
-    if((stability_frontier + 1) % 5000 == 0) {
-        sf_arrive_time_map[stability_frontier] = get_time_us();
-        for(int i = 1; i < (int)value_ve.size(); i++) {
-            std::cout << arr[i] << " ";
+    /**wait for certain file size, and record the first time it arrives**/
+    for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
+        int tmp_val = it->second(5, arr);
+        int tmp_sf = pair_ve[tmp_val - 1].second;
+        if(tmp_sf == wait_target_sf) {
+            if(predicate_arrive_map.count(it->first) == 0) {
+                predicate_arrive_map[it->first] = get_time_us();
+            }
         }
-        std::cout << std::endl;
-        all_sf_situation[all_sf_tics * 7] = get_time_us();
-        int tmp_idx = 1;
-        for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
-            int tmp_val = it->second(5, arr);
-            all_sf_situation[all_sf_tics * 7 + tmp_idx] = pair_ve[tmp_val - 1].second;
-            tmp_idx++;
-        }
-        all_sf_tics++;
     }
 
     stability_frontier_arrive_cv.notify_one();
@@ -519,6 +530,8 @@ void WanAgentSender::generate_predicate() {
 }
 
 void WanAgentSender::set_stability_frontier(int sf) {
+    message_sender->wait_target_sf = sf;
+    std::cout << "msg senderwaiting for " << message_sender->wait_target_sf << std::endl;
     wait_sf_thread = std::thread(&MessageSender::wait_stability_frontier_loop, message_sender.get(), sf);
 }
 
@@ -552,22 +565,40 @@ void WanAgentSender::test_predicate() {
     log_debug("current test_predicate returned: {}", cur);
 }
 void WanAgentSender::out_out_file() {
-    std::ofstream file("./enter_leave.csv");
-    if(file) {
-        file << "enter_time,s1,s2,s3,s4,s5,s6,s7\n";
-        for(int i = 0; i < message_sender->msg_idx; i++) {
-            file << message_sender->enter_queue_time_keeper[i] << "," << message_sender->leave_queue_time_keeper[i * 7] << "," << message_sender->leave_queue_time_keeper[i * 7 + 1] << "," << message_sender->leave_queue_time_keeper[i * 7 + 2] << "," << message_sender->leave_queue_time_keeper[i * 7 + 3] << "," << message_sender->leave_queue_time_keeper[i * 7 + 4] << "," << message_sender->leave_queue_time_keeper[i * 7 + 5] << "," << message_sender->leave_queue_time_keeper[i * 7 + 6] << "\n";
+    // std::ofstream file("./enter_leave.csv");
+    // if(file) {
+    //     file << "enter_time,s1,s2,s3,s4,s5,s6,s7\n";
+    //     for(int i = 0; i < message_sender->msg_idx; i++) {
+    //         file << message_sender->enter_queue_time_keeper[i] << "," << message_sender->leave_queue_time_keeper[i * 7] << "," << message_sender->leave_queue_time_keeper[i * 7 + 1] << "," << message_sender->leave_queue_time_keeper[i * 7 + 2] << "," << message_sender->leave_queue_time_keeper[i * 7 + 3] << "," << message_sender->leave_queue_time_keeper[i * 7 + 4] << "," << message_sender->leave_queue_time_keeper[i * 7 + 5] << "," << message_sender->leave_queue_time_keeper[i * 7 + 6] << "\n";
+    //     }
+    // }
+    // file.close();
+
+
+    // std::ofstream file1("./all_sf.csv");
+    // if(file1) {
+    //     file1 << "timestamp,";
+    //     for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
+    //         file1 << it->first << ",";
+    //     }
+    //     file1 << "\n";
+    //     for(int i = 0; i < message_sender->all_sf_tics; i++) {
+    //         file1 << message_sender->all_sf_situation[i * 7] << "," << message_sender->all_sf_situation[i * 7 + 1] << "," << message_sender->all_sf_situation[i * 7 + 2] << "," << message_sender->all_sf_situation[i * 7 + 3] << "," << message_sender->all_sf_situation[i * 7 + 4] << "," << message_sender->all_sf_situation[i * 7 + 5] << "," << message_sender->all_sf_situation[i * 7 + 6] << "\n";
+    //     }
+    // }
+    // file1.close();
+
+
+    std::string file2name = "./" + std::to_string(message_sender->wait_target_sf+1) + "_files_arrive_time.csv";
+    std::ofstream file2(file2name);
+    if(file2) {
+        file2 << "predicate,timestamp\n";
+        file2 << "start," << message_sender->enter_queue_time_keeper[0] << "\n";
+        for(std::map<std::string, uint64_t>::iterator it = message_sender->predicate_arrive_map.begin(); it != message_sender->predicate_arrive_map.end(); it++) {
+            file2 << it->first << "," << it->second << "\n";
         }
     }
-    file.close();
-    std::ofstream file1("./all_sf.csv");
-    if(file1) {
-        file1 << "timestamp,ALL_REGION,ALL_SITE,MAJ_REGION,MAJ_SITE,ONE_REGION,ONE_SITE\n";
-        for(int i = 0; i < message_sender->all_sf_tics; i++) {
-            file1 << message_sender->all_sf_situation[i*7] << "," << message_sender->all_sf_situation[i*7 + 1] << "," << message_sender->all_sf_situation[i*7 + 2] << "," << message_sender->all_sf_situation[i*7 + 3] << "," << message_sender->all_sf_situation[i*7 + 4] << ","<< message_sender->all_sf_situation[i*7 + 5] << "," << message_sender->all_sf_situation[i*7 + 6] << "\n";
-        }
-    }
-    file1.close();
+    file2.close();
 }
 void WanAgentSender::shutdown_and_wait() {
     std::cout << "all done! " << get_time_us() << std::endl;
