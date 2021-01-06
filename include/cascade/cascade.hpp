@@ -465,7 +465,8 @@ public:
                            set_stability_frontier,
                            set_wan_sender_info,
                            get_stability_frontier_arrive_time,
-                           start_wanagent);
+                           start_wanagent,
+                           get_stability_frontier);
     virtual std::tuple<persistent::version_t, uint64_t> put(
             const VT& value) override;
     virtual std::tuple<persistent::version_t, uint64_t> remove(
@@ -508,6 +509,7 @@ public:
 
     void set_stability_frontier(int sf);
     uint64_t get_stability_frontier_arrive_time();
+    int get_stability_frontier();
     void start_wanagent();
 
     std::unique_ptr<wan_agent::WanAgentSender> wan_agent_sender;

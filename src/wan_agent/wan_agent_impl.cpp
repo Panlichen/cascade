@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <stdexcept>
@@ -273,7 +274,13 @@ MessageSender::MessageSender(const site_id_t& local_site_id,
             int fd = ::socket(AF_INET, SOCK_STREAM, 0);
             if(fd < 0)
                 throw std::runtime_error("MessageSender failed to create socket.");
+            int flag = 1;
+            int ret = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
 
+            if(ret == -1) {
+                fprintf(stderr, "ERROR on setsockopt: %s\n", strerror(errno));
+                exit(-1);
+            }
             memset(&serv_addr, 0, sizeof(serv_addr));
             serv_addr.sin_family = AF_INET;
             serv_addr.sin_port = htons(ip_port.second);
@@ -309,12 +316,12 @@ void MessageSender::recv_ack_loop() {
                     throw std::runtime_error("sequence number is out of order for site-" + std::to_string(res.site_id) + ", counter = " + std::to_string(message_counters[res.site_id].load()) + ", seqno = " + std::to_string(res.seq));
                 }
                 message_counters[res.site_id]++;
-
+                uint64_t pre_cal_st_time = get_time_us();
                 predicate_calculation();
-                if(res.seq == wait_target_sf){
-                    ack_keeper[res.site_id - 1000] = get_time_us();
-                }
-                
+                transfer_data_cost += (get_time_us() - pre_cal_st_time) / 1000000.0;
+                // if(res.seq == wait_target_sf) {
+                //     ack_keeper[res.site_id - 1000] = get_time_us();
+                // }
             }
         }
     }
@@ -336,11 +343,7 @@ void MessageSender::predicate_calculation() {
 
     int val = predicate(5, arr);
     stability_frontier = pair_ve[val - 1].second;
-    uint64_t sf_cal_st_time = get_time_us();
-    complicate_predicate(5,test_arr);
-    // predicate_map["Complicated"](5,test_arr);
-    // non_gccjit_calculation(test_arr);
-    sf_calculation_cost += (get_time_us() - sf_cal_st_time) / 1000000.0;
+
     /**general recording all sf at every 5000 message**/
     // if((stability_frontier + 1) % 5000 == 0) {
     //     sf_arrive_time_map[stability_frontier] = get_time_us();
@@ -370,105 +373,96 @@ void MessageSender::predicate_calculation() {
     // }
 
     /**record every message arrive to see each file's performance**/
-    // int predicate_idx = 6;
-    // for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
-    //     int tmp_val = it->second(5, arr);
-    //     int tmp_sf = pair_ve[tmp_val - 1].second;
-    //     if(tmp_sf > 0 && sf_arrive_time_keeper[tmp_sf * 6 - predicate_idx] == 0) {
-    //         sf_arrive_time_keeper[tmp_sf * 6 - predicate_idx] = get_time_us();
-    //     }
-    //     predicate_idx--;
-    // }
+    int predicate_idx = 6;
+    for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
+        int tmp_val = it->second(5, arr);
+        int tmp_sf = pair_ve[tmp_val - 1].second;
+        if(tmp_sf > 0 && sf_arrive_time_keeper[tmp_sf * 6 - predicate_idx] == 0) {
+            sf_arrive_time_keeper[tmp_sf * 6 - predicate_idx] = get_time_us();
+        }
+        if(tmp_sf > 0 && it->first == "MAX_NODE" && who_is_max[tmp_sf] == 0) {
+            who_is_max[tmp_sf] = pair_ve[tmp_val - 1].first;
+        }
+
+        predicate_idx--;
+    }
     stability_frontier_arrive_cv.notify_one();
 
-    log_exit_func();
+    /**comparation with gccjit and none gccjit**/
+    // uint64_t sf_cal_st_time = get_time_us();
+    // complicate_predicate(5, test_arr);
+    // predicate_map["Complicated"](5,test_arr);
+    // non_gccjit_calculation(test_arr);
+    // sf_calculation_cost += (get_time_us() - sf_cal_st_time) / 1000000.0;
+    // log_exit_func();
 }  // namespace wan_agent
 
-int MessageSender::non_gccjit_calculation(int *seq_vec)
-{
-   int predicate_size = (int)operations.size();
-   int operation_num = (int)operations.size();
-   // blocks initialization based on # of operator
-   for (int i = 0; i < predicate_size; i++)
-   {
-      int maxx = -1, minn = 0x7f7f7f7f, kth = 0;
-      int maxx_idx = -1, minn_idx = -1, kth_idx = -1;
-      int operation_index = operation_num - 1 - i;
-      int op = operations[operation_index].op_code;
+int MessageSender::non_gccjit_calculation(int* seq_vec) {
+    int predicate_size = (int)operations.size();
+    int operation_num = (int)operations.size();
+    // blocks initialization based on # of operator
+    for(int i = 0; i < predicate_size; i++) {
+        int maxx = -1, minn = 0x7f7f7f7f, kth = 0;
+        int maxx_idx = -1, minn_idx = -1, kth_idx = -1;
+        int operation_index = operation_num - 1 - i;
+        int op = operations[operation_index].op_code;
 
-      switch (op)
-      {
-      case 1: // MAX
-         maxx = -1;
-         for (int j = 0; j < (int)operations[operation_index].site_range.size(); j++)
-         {
-            if (maxx < seq_vec[operations[operation_index].site_range[j]])
-            {
-               maxx = seq_vec[operations[operation_index].site_range[j]];
-               maxx_idx = operations[operation_index].site_range[j];
-            }
-         }
-         if (operations[operation_index].pass_result_to != -1)
-         {
-            // int pass_to = operation_num - 1 - operations[operation_index].pass_result_to;
-            // cout << operations[operation_index].pass_result_to << endl;
-            // operations[pass_to].site_range.push_back(maxx_idx);
-            operations[operations[operation_index].pass_result_to].site_range.push_back(maxx_idx);
-         }
-         else
-         {
-            return maxx_idx;
-         }
-         break;
-      case 2: //MIN
-         minn = 0x7f7f7f7f;
-         for (int j = 0; j < (int)operations[operation_index].site_range.size(); j++)
-         {
-            if (minn > seq_vec[operations[operation_index].site_range[j]])
-            {
-               minn = seq_vec[operations[operation_index].site_range[j]];
-               minn_idx = operations[operation_index].site_range[j];
-            }
-         }
-         if (operations[operation_index].pass_result_to != -1)
-         {
-            // int pass_to = operation_num - 1 - operations[operation_index].pass_result_to;
-            // operations[pass_to].site_range.push_back(minn_idx);
-            operations[operations[operation_index].pass_result_to].site_range.push_back(minn_idx);
-         }
-         else
-         {
-            return minn_idx;
-         }
-         break;
-      case 3: //KTH
-         kth = operations[operation_index].kth_k;
-         for (int j = 0; j < (int)operations[operation_index].site_range.size() - 1; j++)
-         {
-            for (int k = 0; k < (int)operations[operation_index].site_range.size() - j - 1; k++)
-            {
-               if (seq_vec[operations[operation_index].site_range[k]] > seq_vec[operations[operation_index].site_range[k + 1]])
-               {
-                  int tmp = seq_vec[operations[operation_index].site_range[k]];
-                  seq_vec[operations[operation_index].site_range[k]] = seq_vec[operations[operation_index].site_range[k + 1]];
-                  seq_vec[operations[operation_index].site_range[k + 1]] = tmp;
-               }
-            }
-         }
-         if (operations[operation_index].pass_result_to != -1)
-         {
-            int pass_to = operation_num - 1 - operations[operation_index].pass_result_to;
-            operations[pass_to].site_range.push_back(operations[operation_index].site_range[kth - 1]);
-         }
-         else
-         {
-            return operations[operation_index].site_range[kth - 1];
-         }
-         break;
-      default:
-         break;
-      }
-   }
+        switch(op) {
+            case 1:  // MAX
+                maxx = -1;
+                for(int j = 0; j < (int)operations[operation_index].site_range.size(); j++) {
+                    if(maxx < seq_vec[operations[operation_index].site_range[j]]) {
+                        maxx = seq_vec[operations[operation_index].site_range[j]];
+                        maxx_idx = operations[operation_index].site_range[j];
+                    }
+                }
+                if(operations[operation_index].pass_result_to != -1) {
+                    // int pass_to = operation_num - 1 - operations[operation_index].pass_result_to;
+                    // cout << operations[operation_index].pass_result_to << endl;
+                    // operations[pass_to].site_range.push_back(maxx_idx);
+                    operations[operations[operation_index].pass_result_to].site_range.push_back(maxx_idx);
+                } else {
+                    return maxx_idx;
+                }
+                break;
+            case 2:  //MIN
+                minn = 0x7f7f7f7f;
+                for(int j = 0; j < (int)operations[operation_index].site_range.size(); j++) {
+                    if(minn > seq_vec[operations[operation_index].site_range[j]]) {
+                        minn = seq_vec[operations[operation_index].site_range[j]];
+                        minn_idx = operations[operation_index].site_range[j];
+                    }
+                }
+                if(operations[operation_index].pass_result_to != -1) {
+                    // int pass_to = operation_num - 1 - operations[operation_index].pass_result_to;
+                    // operations[pass_to].site_range.push_back(minn_idx);
+                    operations[operations[operation_index].pass_result_to].site_range.push_back(minn_idx);
+                } else {
+                    return minn_idx;
+                }
+                break;
+            case 3:  //KTH
+                kth = operations[operation_index].kth_k;
+                for(int j = 0; j < (int)operations[operation_index].site_range.size() - 1; j++) {
+                    for(int k = 0; k < (int)operations[operation_index].site_range.size() - j - 1; k++) {
+                        if(seq_vec[operations[operation_index].site_range[k]] > seq_vec[operations[operation_index].site_range[k + 1]]) {
+                            int tmp = seq_vec[operations[operation_index].site_range[k]];
+                            seq_vec[operations[operation_index].site_range[k]] = seq_vec[operations[operation_index].site_range[k + 1]];
+                            seq_vec[operations[operation_index].site_range[k + 1]] = tmp;
+                        }
+                    }
+                }
+                if(operations[operation_index].pass_result_to != -1) {
+                    int pass_to = operation_num - 1 - operations[operation_index].pass_result_to;
+                    operations[pass_to].site_range.push_back(operations[operation_index].site_range[kth - 1]);
+                } else {
+                    return operations[operation_index].site_range[kth - 1];
+                }
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 void MessageSender::wait_stability_frontier_loop(int sf) {
@@ -522,7 +516,7 @@ void MessageSender::send_msg_loop() {
                 // time_keeper[curr_seqno*4+site_id-1] = now_us();
                 sock_write(events[i].data.fd, RequestHeader{curr_seqno, local_site_id, payload_size});
                 sock_write(events[i].data.fd, buffer_list.front().message_body, payload_size);
-                // leave_queue_time_keeper[curr_seqno * 7 + site_id - 1000] = get_time_us();
+                leave_queue_time_keeper[curr_seqno * 7 + site_id - 1000] = get_time_us();
                 // buffer_size[curr_seqno] = size;
 
                 last_sent_seqno[site_id] = curr_seqno;
@@ -612,33 +606,33 @@ void WanAgentSender::submit_predicate(std::string key, std::string predicate_str
     predicate_map[key] = prl;
     message_sender->predicate_map[key] = prl;
 
-    if(key == "Complicated"){
+    if(key == "Complicated") {
         std::vector<pre_operation> pre_vec(std::begin(predicate_generator->driver.operations), std::end(predicate_generator->driver.operations));
         message_sender->operations = pre_vec;
         message_sender->complicate_predicate = prl;
-        std::cout << "sender's operation: " <<  message_sender->operations.size() << std::endl;
+        std::cout << "sender's operation: " << message_sender->operations.size() << std::endl;
     }
     // test_predicate();
 }
 
 void WanAgentSender::generate_predicate() {
-    std::string predicates[7] = {
+    std::string predicates[6] = {
             "MAX($1,$2,$3,$4,$5,$6,$7)",
             "MAX(MAX($2,$3,$4),MAX($5,$6),$7)",
             "KTH_MIN($2,MAX($2,$3,$4),MAX($5,$6),$7)",
             "MIN(MAX($2,$3,$4),MAX($5,$6),$7)",
             "MIN($1,$2,$3,$4,$5,$6,$7)",
-            "KTH_MIN($4,$1,$2,$3,$4,$5,$6,$7)",
-            "KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10))"};
-    std::string keys[7] = {
+            "KTH_MIN($4,$1,$2,$3,$4,$5,$6,$7)"};
+    // "KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10))"};
+    std::string keys[6] = {
             "MAX_NODE",
             "MAX_REGION",
             "MAJ_REGION",
             "MIN_REGION",
             "MIN_NODE",
-            "MAJ_NODE",
-            "Complicated"};
-    for(int i = 0; i < 7; i++) {
+            "MAJ_NODE"};
+    // "Complicated"};
+    for(int i = 0; i < 6; i++) {
         submit_predicate(keys[i], predicates[i], false);
     }
 }
@@ -653,6 +647,9 @@ uint64_t WanAgentSender::get_stability_frontier_arrive_time() {
     std::unique_lock<std::mutex> lock(message_sender->stability_frontier_set_mutex);
     message_sender->stability_frontier_set_cv.wait(lock, [this]() { return message_sender->sf_arrive_time != 0; });
     return message_sender->sf_arrive_time;
+}
+int WanAgentSender::get_stability_frontier() {
+    return message_sender->stability_frontier;
 }
 
 void WanAgentSender::change_predicate(std::string key) {
@@ -679,14 +676,14 @@ void WanAgentSender::test_predicate() {
     log_debug("current test_predicate returned: {}", cur);
 }
 void WanAgentSender::out_out_file() {
-    // std::ofstream file("./enter_leave.csv");
-    // if(file) {
-    //     file << "enter_time,s1,s2,s3,s4,s5,s6,s7\n";
-    //     for(int i = 0; i < message_sender->msg_idx; i++) {
-    //         file << message_sender->enter_queue_time_keeper[i] << "," << message_sender->leave_queue_time_keeper[i * 7] << "," << message_sender->leave_queue_time_keeper[i * 7 + 1] << "," << message_sender->leave_queue_time_keeper[i * 7 + 2] << "," << message_sender->leave_queue_time_keeper[i * 7 + 3] << "," << message_sender->leave_queue_time_keeper[i * 7 + 4] << "," << message_sender->leave_queue_time_keeper[i * 7 + 5] << "," << message_sender->leave_queue_time_keeper[i * 7 + 6] << "\n";
-    //     }
-    // }
-    // file.close();
+    std::ofstream file("./enter_leave.csv");
+    if(file) {
+        file << "enter_time,s1,s2,s3,s4,s5,s6,s7\n";
+        for(int i = 0; i < message_sender->msg_idx; i++) {
+            file << message_sender->enter_queue_time_keeper[i] << "," << message_sender->leave_queue_time_keeper[i * 7] << "," << message_sender->leave_queue_time_keeper[i * 7 + 1] << "," << message_sender->leave_queue_time_keeper[i * 7 + 2] << "," << message_sender->leave_queue_time_keeper[i * 7 + 3] << "," << message_sender->leave_queue_time_keeper[i * 7 + 4] << "," << message_sender->leave_queue_time_keeper[i * 7 + 5] << "," << message_sender->leave_queue_time_keeper[i * 7 + 6] << "\n";
+        }
+    }
+    file.close();
 
     // std::ofstream file1("./all_sf.csv");
     // if(file1) {
@@ -708,24 +705,25 @@ void WanAgentSender::out_out_file() {
     //     file2 << "predicate,timestamp\n";
     //     file2 << "start," << message_sender->enter_queue_time_keeper[0] << "\n";
     //     for(std::map<std::string, uint64_t>::iterator it = message_sender->predicate_arrive_map.begin(); it != message_sender->predicate_arrive_map.end(); it++) {
-    //         file2 << it->first << "," << it->second << "\n";
+    //         file2 << it->first << "," << (it->second - message_sender->enter_queue_time_keeper[0]) / 1000000.0 << "\n";
     //     }
     // }
     // file2.close();
 
     /**record every message arrive to see each file's performance**/
-    // std::ofstream file3("./all_sf_for_each_msg.csv");
-    // if(file3) {
-    //     file3 << "enter_time,";
-    //     for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
-    //         file3 << it->first << ",";
-    //     }
-    //     file3 << "\n";
-    //     for(int i = 0; i < message_sender->msg_idx; i++) {
-    //         file3 << message_sender->enter_queue_time_keeper[i] << "," << message_sender->sf_arrive_time_keeper[i * 6] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 1] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 2] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 3] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 4] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 5] << "\n";
-    //     }
-    // }
-    // file3.close();
+    std::ofstream file3("./all_sf_for_each_msg.csv");
+    if(file3) {
+        file3 << "enter_time,";
+        for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
+            file3 << it->first << ",";
+        }
+        file3 << "who_is_max";
+        file3 << "\n";
+        for(int i = 0; i < message_sender->msg_idx; i++) {
+            file3 << message_sender->enter_queue_time_keeper[i] << "," << message_sender->sf_arrive_time_keeper[i * 6] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 1] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 2] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 3] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 4] << "," << message_sender->sf_arrive_time_keeper[i * 6 + 5] << "," << message_sender->who_is_max[i] << "\n";
+        }
+    }
+    file3.close();
 
     /**record ack to calculate the utility of the bandwidth**/
     // std::ofstream file4("./ack_keeper_bandwidth.csv");
@@ -739,11 +737,13 @@ void WanAgentSender::out_out_file() {
     // }
     // file4.close();
 }
+
 void WanAgentSender::shutdown_and_wait() {
     std::cout << "all done! " << get_time_us() << std::endl;
-    std::cout << "all done used " << (message_sender->sf_arrive_time - message_sender->enter_queue_time_keeper[0])/1000000.0 << std::endl;
-    std::cout << "sf cal cost " << message_sender->sf_calculation_cost/100000.0 << std::endl;
-    std::cout << "per latency " << ((message_sender->sf_arrive_time - message_sender->enter_queue_time_keeper[0])/1000000.0) / 100000 << std::endl;
+    std::cout << "all done used " << (message_sender->sf_arrive_time - message_sender->enter_queue_time_keeper[0]) / 1000000.0 << std::endl;
+    // std::cout << "sf cal cost " << message_sender->sf_calculation_cost / 100000.0 << std::endl;
+    std::cout << "total sf cal cost " << message_sender->transfer_data_cost / 100000.0 << std::endl;
+    // std::cout << "per latency " << ((message_sender->sf_arrive_time - message_sender->enter_queue_time_keeper[0]) / 1000000.0) / 100000 << std::endl;
     log_enter_func();
     is_shutdown.store(true);
     // report_new_ack(); // to wake up all predicate_loop threads with a pusedo "new ack"

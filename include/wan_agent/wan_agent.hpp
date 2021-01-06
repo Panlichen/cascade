@@ -262,13 +262,14 @@ private:
 public:
     std::vector<pre_operation> operations;
     // uint64_t *buffer_size = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
-    // uint64_t *leave_queue_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 7 * N_MSG));
+    uint64_t *leave_queue_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 7 * N_MSG));
     /**all sf for each msg**/
-    // uint64_t *sf_arrive_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 6 * N_MSG));
-    uint64_t *ack_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 10 ));
+    uint64_t *sf_arrive_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 6 * N_MSG));
+    // uint64_t *ack_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * 10 ));
     uint64_t *enter_queue_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
     // wait for certaion stability frontier
     int stability_frontier = 0;
+    uint64_t *who_is_max = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
     // wait for what sf?
     int wait_target_sf = -1;
     int test_arr[11] = {0, 3, 7, 1, 5, 4, 2, 8, 6, 0, 9};
@@ -371,6 +372,8 @@ public:
     void generate_predicate();
 
     void change_predicate(std::string key);
+
+    int get_stability_frontier();
 
     uint64_t get_stability_frontier_arrive_time();
     void set_stability_frontier(int sf);

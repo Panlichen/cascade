@@ -885,6 +885,10 @@ uint64_t WANPersistentCascadeStore<KT, VT, IK, IV, ST>::get_stability_frontier_a
     wan_agent_sender->shutdown_and_wait();
     return res;
 }
+template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
+int WANPersistentCascadeStore<KT, VT, IK, IV, ST>::get_stability_frontier(){
+    return wan_agent_sender->get_stability_frontier();
+}
 
 template <typename KT, typename VT, KT* IK, VT* IV, persistent::StorageType ST>
 std::tuple<persistent::version_t, uint64_t> WANPersistentCascadeStore<KT, VT, IK, IV, ST>::remove(const KT& key) {

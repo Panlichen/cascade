@@ -346,7 +346,19 @@ struct client_states {
         std::cout << "Latency-std (us): " << std_latency_us << std::endl;
     }
 };
-
+int get_sleep_time(int file_num) {
+    int sleep_time = (file_num / 200) + 1;
+    std::cout << "sleep " << sleep_time << std::endl;
+    if(file_num < 200) {
+        sleep(1);
+    } else if(file_num < 10000) {
+        sleep(sleep_time);
+    } else if(file_num < 20000) {
+        sleep(46);
+    } else {
+        sleep(84);
+    }
+}
 inline uint64_t randomize_key(uint64_t& in) {
     static uint64_t random_seed = get_time_us();
     uint64_t x = (in ^ random_seed);
@@ -370,7 +382,11 @@ int do_client(int argc, char** args) {
         std::cout << "TODO:" << test_type << " not supported yet." << std::endl;
         return 0;
     }
-
+    // std::ofstream file("./message_index.csv");
+    // if(!file) {
+    //     exit(-1);
+    // }
+    // file << "msg_idx" << "\n";
     /** 1 - create external client group*/
     derecho::ExternalGroup<WPCSU, WPCSS> group;
 
@@ -404,11 +420,11 @@ int do_client(int argc, char** args) {
         int idx = 0;
 
         /**fixed number of message**/
-        while(idx != num_messages) {
-            ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
-            cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
-            idx++;
-        }
+        // while(idx != num_messages) {
+        //     ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+        //     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
+        //     idx++;
+        // }
 
         /** the fixed message size with flow control**/
         // while(idx != num_messages){
@@ -420,9 +436,9 @@ int do_client(int argc, char** args) {
         //     }
         //     std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_GRANULARITY_US));
         // }
-
+        int sf = 0;
         /** send with trace **/
-        /*
+        int pre_file_size = 0;
         while(getline(inFile, lineStr)) {
             std::vector<std::string> fields;
             std::stringstream ss(lineStr);
@@ -432,11 +448,16 @@ int do_client(int argc, char** args) {
             }
             int timestamp = atoi(fields[1].c_str());
             // cout << "time: " << timestamp << endl;
+            int file_nnn_num = pre_file_size / msg_size;
+            // get_sleep_time(file_nnn_num);
             sleep(timestamp);
             int file_size = atoi(fields[0].c_str());
+            pre_file_size = file_size;
             // cout << "file size: " << file_size << endl;
             // file_size = msg_size;
+            // file << message_index << "\n";
 
+            cout << " message index: " << message_index << endl;
             if(file_size < msg_size) {
                 // ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, file_size));
                 ObjectWithStringKey o(std::to_string(message_index), Blob(bbuf, file_size));
@@ -469,8 +490,19 @@ int do_client(int argc, char** args) {
                     // cout << " 3message index: " << message_index << endl;
                 }
             }
+
+            /**sync sending code**/
+            // while(sf != (int)message_index) {
+            //     sleep(0.1);
+            //     auto tmp_get_sf_results = wpcss_ec.p2p_send<RPC_NAME(get_stability_frontier)>(server_id);
+            //     auto& tmp_get_sf_replies = tmp_get_sf_results.get();
+            //     for(auto& reply_pair : tmp_get_sf_replies) {
+            //         sf = reply_pair.second.get();
+            //     }
+            // }
+            // std::cout << "sf : " << sf << std::endl;
         }
-        */
+        // file.close();
         free(bbuf);
         cs.wait_poll_all();
         cs.print_statistics();
