@@ -407,7 +407,7 @@ int do_client(int argc, char** args) {
         ExternalClientCaller<WPCSS, std::remove_reference<decltype(group)>::type>& wpcss_ec = group.get_subgroup_caller<WPCSS>();
         auto members = group.template get_shard_members<WPCSS>(0, 0);
         node_id_t server_id = members[my_node_id % members.size()];
-        std::ifstream inFile("/root/lpz/icdcs_cascade/cascade/trace_09_20.csv", std::ios::in);
+        std::ifstream inFile("/root/lpz/icdcs_cascade/cascade/trace_09_20_small.csv", std::ios::in);
         std::string lineStr;
         getline(inFile, lineStr);
         uint64_t message_index = 0;
@@ -421,7 +421,7 @@ int do_client(int argc, char** args) {
 
         /**fixed number of message**/
         // while(idx != num_messages) {
-        //     ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, msg_size));
+        //     ObjectWithStringKey o(std::to_string(randomize_key(message_index) % max_distinct_objects), Blob(bbuf, 1393));
         //     cs.do_send(message_index, [&o, &wpcss_ec, &server_id]() { return std::move(wpcss_ec.p2p_send<RPC_NAME(put)>(server_id, o)); });
         //     idx++;
         // }
@@ -436,8 +436,10 @@ int do_client(int argc, char** args) {
         //     }
         //     std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_GRANULARITY_US));
         // }
-        int sf = 0;
+        
         /** send with trace **/
+        
+        int sf = 0;
         int pre_file_size = 0;
         while(getline(inFile, lineStr)) {
             std::vector<std::string> fields;
@@ -450,7 +452,7 @@ int do_client(int argc, char** args) {
             // cout << "time: " << timestamp << endl;
             int file_nnn_num = pre_file_size / msg_size;
             // get_sleep_time(file_nnn_num);
-            sleep(timestamp);
+            // sleep(timestamp);
             int file_size = atoi(fields[0].c_str());
             pre_file_size = file_size;
             // cout << "file size: " << file_size << endl;
@@ -491,18 +493,19 @@ int do_client(int argc, char** args) {
                 }
             }
 
-            /**sync sending code**/
-            // while(sf != (int)message_index) {
-            //     sleep(0.1);
-            //     auto tmp_get_sf_results = wpcss_ec.p2p_send<RPC_NAME(get_stability_frontier)>(server_id);
-            //     auto& tmp_get_sf_replies = tmp_get_sf_results.get();
-            //     for(auto& reply_pair : tmp_get_sf_replies) {
-            //         sf = reply_pair.second.get();
-            //     }
-            // }
-            // std::cout << "sf : " << sf << std::endl;
+            // sync sending code
+            while(sf != (int)message_index) {
+                sleep(0.001);
+                auto tmp_get_sf_results = wpcss_ec.p2p_send<RPC_NAME(get_stability_frontier)>(server_id);
+                auto& tmp_get_sf_replies = tmp_get_sf_results.get();
+                for(auto& reply_pair : tmp_get_sf_replies) {
+                    sf = reply_pair.second.get();
+                }
+            }
+            std::cout << "sf : " << sf << std::endl;
         }
         // file.close();
+        
         free(bbuf);
         cs.wait_poll_all();
         cs.print_statistics();

@@ -274,13 +274,13 @@ MessageSender::MessageSender(const site_id_t& local_site_id,
             int fd = ::socket(AF_INET, SOCK_STREAM, 0);
             if(fd < 0)
                 throw std::runtime_error("MessageSender failed to create socket.");
-            int flag = 1;
-            int ret = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
+            // int flag = 1;
+            // int ret = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
 
-            if(ret == -1) {
-                fprintf(stderr, "ERROR on setsockopt: %s\n", strerror(errno));
-                exit(-1);
-            }
+            // if(ret == -1) {
+            //     fprintf(stderr, "ERROR on setsockopt: %s\n", strerror(errno));
+            //     exit(-1);
+            // }
             memset(&serv_addr, 0, sizeof(serv_addr));
             serv_addr.sin_family = AF_INET;
             serv_addr.sin_port = htons(ip_port.second);
@@ -380,9 +380,9 @@ void MessageSender::predicate_calculation() {
         if(tmp_sf > 0 && sf_arrive_time_keeper[tmp_sf * 6 - predicate_idx] == 0) {
             sf_arrive_time_keeper[tmp_sf * 6 - predicate_idx] = get_time_us();
         }
-        if(tmp_sf > 0 && it->first == "MAX_NODE" && who_is_max[tmp_sf] == 0) {
-            who_is_max[tmp_sf] = pair_ve[tmp_val - 1].first;
-        }
+        // if(tmp_sf > 0 && it->first == "MAX_NODE" && who_is_max[tmp_sf] == 0) {
+        //     who_is_max[tmp_sf] = pair_ve[tmp_val - 1].first;
+        // }
 
         predicate_idx--;
     }
