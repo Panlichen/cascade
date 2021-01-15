@@ -269,11 +269,11 @@ public:
     uint64_t *enter_queue_time_keeper = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
     // wait for certaion stability frontier
     int stability_frontier = 0;
-    uint64_t *who_is_max = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
+    // uint64_t *who_is_max = static_cast<uint64_t *>(malloc(sizeof(uint64_t) * N_MSG));
     // wait for what sf?
     int wait_target_sf = -1;
     int test_arr[11] = {0, 3, 7, 1, 5, 4, 2, 8, 6, 0, 9};
-    uint64_t* all_sf_situation = static_cast<uint64_t*>(malloc(sizeof(uint64_t) * 40000));
+    // uint64_t* all_sf_situation = static_cast<uint64_t*>(malloc(sizeof(uint64_t) * 40000));
     // index for sf_time_keeper;
     int all_sf_tics = 0;
     int msg_idx = 0;

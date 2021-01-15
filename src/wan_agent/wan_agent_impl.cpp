@@ -274,13 +274,13 @@ MessageSender::MessageSender(const site_id_t& local_site_id,
             int fd = ::socket(AF_INET, SOCK_STREAM, 0);
             if(fd < 0)
                 throw std::runtime_error("MessageSender failed to create socket.");
-            // int flag = 1;
-            // int ret = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
+            int flag = 1;
+            int ret = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
 
-            // if(ret == -1) {
-            //     fprintf(stderr, "ERROR on setsockopt: %s\n", strerror(errno));
-            //     exit(-1);
-            // }
+            if(ret == -1) {
+                fprintf(stderr, "ERROR on setsockopt: %s\n", strerror(errno));
+                exit(-1);
+            }
             memset(&serv_addr, 0, sizeof(serv_addr));
             serv_addr.sin_family = AF_INET;
             serv_addr.sin_port = htons(ip_port.second);
@@ -345,7 +345,8 @@ void MessageSender::predicate_calculation() {
     stability_frontier = pair_ve[val - 1].second;
 
     /**general recording all sf at every 5000 message**/
-    // if((stability_frontier + 1) % 5000 == 0) {
+    if((stability_frontier + 1) % 5000 == 0) {
+        std::cout << stability_frontier << std::endl;
     //     sf_arrive_time_map[stability_frontier] = get_time_us();
     //     for(int i = 1; i < (int)value_ve.size(); i++) {
     //         std::cout << arr[i] << " ";
@@ -359,7 +360,7 @@ void MessageSender::predicate_calculation() {
     //         tmp_idx++;
     //     }
     //     all_sf_tics++;
-    // }
+    }
 
     /**wait for certain file size, and record the first time it arrives**/
     // for(std::map<std::string, predicate_fn_type>::iterator it = predicate_map.begin(); it != predicate_map.end(); it++) {
@@ -616,14 +617,24 @@ void WanAgentSender::submit_predicate(std::string key, std::string predicate_str
 }
 
 void WanAgentSender::generate_predicate() {
+    // origin
+    // std::string predicates[6] = {
+    //         "MAX($1,$2,$3,$4,$5,$6,$7)",
+    //         "MAX(MAX($2,$3,$4),MAX($5,$6),$7)",
+    //         "KTH_MIN($2,MAX($2,$3,$4),MAX($5,$6),$7)",
+    //         "MIN(MAX($2,$3,$4),MAX($5,$6),$7)",
+    //         "MIN($1,$2,$3,$4,$5,$6,$7)",
+    //         "KTH_MIN($4,$1,$2,$3,$4,$5,$6,$7)"};
+    // "KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10))"};
+    
+    // new
     std::string predicates[6] = {
             "MAX($1,$2,$3,$4,$5,$6,$7)",
-            "MAX(MAX($2,$3,$4),MAX($5,$6),$7)",
-            "KTH_MIN($2,MAX($2,$3,$4),MAX($5,$6),$7)",
-            "MIN(MAX($2,$3,$4),MAX($5,$6),$7)",
+            "MAX(MAX($2,$3,$4,$5),$6,$7)",
+            "KTH_MIN($2,MAX($2,$3,$4,$5),$6,$7)",
+            "MIN(MAX($2,$3,$4,$5),$6,$7)",
             "MIN($1,$2,$3,$4,$5,$6,$7)",
             "KTH_MIN($4,$1,$2,$3,$4,$5,$6,$7)"};
-    // "KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10),KTH_MIN($3,$1, $4,$2,$3,$5,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10,$6, $7,$8,$9,$10))"};
     std::string keys[6] = {
             "MAX_NODE",
             "MAX_REGION",

@@ -348,7 +348,7 @@ struct client_states {
 };
 int get_sleep_time(int file_num) {
     int sleep_time = (file_num / 200) + 1;
-    std::cout << "sleep " << sleep_time << std::endl;
+    std::cout << "sleep  " << sleep_time << std::endl;
     if(file_num < 200) {
         sleep(1);
     } else if(file_num < 10000) {
@@ -407,7 +407,7 @@ int do_client(int argc, char** args) {
         ExternalClientCaller<WPCSS, std::remove_reference<decltype(group)>::type>& wpcss_ec = group.get_subgroup_caller<WPCSS>();
         auto members = group.template get_shard_members<WPCSS>(0, 0);
         node_id_t server_id = members[my_node_id % members.size()];
-        std::ifstream inFile("/root/lpz/icdcs_cascade/cascade/trace_09_20_small.csv", std::ios::in);
+        std::ifstream inFile("/root/lpz/icdcs_cascade/cascade/trace_09_20.csv", std::ios::in);
         std::string lineStr;
         getline(inFile, lineStr);
         uint64_t message_index = 0;
